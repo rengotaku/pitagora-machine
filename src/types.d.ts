@@ -10,6 +10,8 @@ export interface GimmickStats {
   domino: number;
   wheel: number;
   bounceFloor: number;
+  /** 発射装置から坂2 へ着地した直後に速度を補正した回数 */
+  landingBoost: number;
 }
 
 export interface PitagoraStats {

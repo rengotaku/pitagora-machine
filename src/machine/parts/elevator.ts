@@ -16,6 +16,12 @@ export interface ElevatorComponent {
     deltaMs: number,
     onDispense?: (ballId: number) => void
   ): void;
+  /**
+   * キャリア上または待機床で運搬待ちのボールかどうか。
+   * この状態のボールは「動いていない」が詰まっているわけではないので、
+   * 押し出し(nudge)や停滞検知の対象から外す必要がある。
+   */
+  isHolding(ballId: number): boolean;
 }
 
 /**
@@ -112,10 +118,15 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   };
 
   const dispensedBalls = new Set<number>();
+  /** キャリア上・待機床で運搬待ちのボール。update のたびに作り直す */
+  const heldBallIds = new Set<number>();
 
   return {
     bodies,
     sensor,
+    isHolding(ballId: number): boolean {
+      return heldBallIds.has(ballId);
+    },
     update(
       engine: Matter.Engine,
       deltaMs: number,
@@ -138,6 +149,16 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
           b.position.y <= carrierRangeBottom
         );
       });
+
+      // 運搬待ちのボールを記録しておく。呼び出し側はこれを見て、
+      // 待機中のボールを押し出し(nudge)や停滞検知の対象から外す。
+      heldBallIds.clear();
+      for (const b of ballsInCarrier) {
+        const id = (b.plugin as { ballData?: { id: number } })?.ballData?.id;
+        if (id !== undefined) {
+          heldBallIds.add(id);
+        }
+      }
 
       switch (state) {
         case "waiting_bottom": {

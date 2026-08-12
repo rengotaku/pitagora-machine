@@ -586,7 +586,16 @@ export function startSimulation(
     // 押す。詰まる構造そのものは経路修正 (launcher の着地加速・domino の復帰
     // 判定・elevator の待機床) で直しているため、ここに来るのは残った局所的な
     // 停滞のみを想定している。
-    const nudgeSamples: NudgeSample[] = samples;
+    // エレベーターで運搬待ちのボールは「動いていない」が詰まってはいない。
+    // 押し出すと待機床から弾き出して落下・回収を誘発するため、判定から外す。
+    // タイマーも消しておかないと、待機を抜けた直後に押されてしまう。
+    const nudgeSamples: NudgeSample[] = samples.filter((s) => {
+      if (elevator.isHolding(s.id)) {
+        nudgeTracker.forget(s.id);
+        return false;
+      }
+      return true;
+    });
     const nudgeIds = nudgeTracker.update(nudgeSamples, effectiveMs);
 
     for (const nudgeId of nudgeIds) {
@@ -603,14 +612,21 @@ export function startSimulation(
 
     // 2b. スタック検知。nudge を試みても maxNudgeCount 回で解消しなければ、
     // 最終的にここで回収・再投入される。
-    const stalledIds = stallTracker.update(samples, effectiveMs);
+    // nudge と同じ理由で、エレベーターの運搬待ちは停滞ではないため除外する。
+    // ここを外さないと、エレベーターの往復（約 4 秒）が停滞のしきい値に達した
+    // 場合に、正常に待っているボールを回収してしまう。
+    const stallSamples: StallSample[] = samples.filter((s) => {
+      if (elevator.isHolding(s.id)) {
+        stallTracker.forget(s.id);
+        return false;
+      }
+      return true;
+    });
+    const stalledIds = stallTracker.update(stallSamples, effectiveMs);
 
     for (const stalledId of stalledIds) {
       const targetBall = ballMap.get(stalledId);
       if (targetBall) {
-        console.log(
-          `[Stall Detected] ballId=${stalledId} at x=${Math.round(targetBall.position.x)}, y=${Math.round(targetBall.position.y)}`
-        );
         Matter.Composite.remove(engine.world, targetBall);
         stallTracker.forget(stalledId);
         nudgeTracker.forget(stalledId);
