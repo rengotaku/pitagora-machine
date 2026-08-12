@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { STEEL_COLOR } from "../../config";
 import { setBodyAngle } from "../kinematic";
 
 export interface WheelOptions {
@@ -34,13 +35,13 @@ export function createWheel(options: WheelOptions): WheelComponent {
   const bladeLength = options.bladeLength ?? 100;
   const bladeThickness = options.bladeThickness ?? 10;
   const angularSpeed = options.angularSpeed ?? 4.0;
-  const color = options.color ?? "#c0392b";
+  const color = options.color ?? STEEL_COLOR;
   const label = options.label ?? "wheel";
 
   const hub = Matter.Bodies.circle(options.x, options.y, radius, {
     isStatic: true,
     label,
-    plugin: { color },
+    plugin: { color, material: "metal", moving: true },
   });
 
   // isStatic な Body は Matter.js 内部で restitution が強制的に 0 に上書きされる
@@ -55,7 +56,7 @@ export function createWheel(options: WheelOptions): WheelComponent {
     {
       isStatic: true,
       label,
-      plugin: { color },
+      plugin: { color, material: "metal", moving: true },
     }
   );
 
@@ -67,7 +68,7 @@ export function createWheel(options: WheelOptions): WheelComponent {
     {
       isStatic: true,
       label,
-      plugin: { color },
+      plugin: { color, material: "metal", moving: true },
     }
   );
 

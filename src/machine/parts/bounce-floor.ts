@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { STEEL_COLOR } from "../../config";
 
 export interface BounceFloorOptions {
   x: number;
@@ -34,7 +35,7 @@ export function createBounceFloor(options: BounceFloorOptions): BounceFloorCompo
   const thickness = options.thickness ?? 10;
   const bounceSpeed = options.bounceSpeed ?? 6.5;
   const friction = options.friction ?? 0.01;
-  const color = options.color ?? "#16a3a0";
+  const color = options.color ?? STEEL_COLOR;
   const label = options.label ?? "bounce_floor";
 
   const floor = Matter.Bodies.rectangle(options.x, options.y, length, thickness, {
@@ -42,7 +43,7 @@ export function createBounceFloor(options: BounceFloorOptions): BounceFloorCompo
     angle: options.angle,
     friction,
     label,
-    plugin: { color },
+    plugin: { color, material: "metal", moving: false },
   });
 
   // normal: ボールが転がる開放側 (角度 0 で真上になる) 方向 (sinθ, -cosθ)

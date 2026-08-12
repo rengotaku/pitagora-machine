@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { STEEL_COLOR } from "../../config";
 import type { Rng } from "../../lib/random";
 import { createRouteSelector, type RouteSide } from "../../lib/route-choice";
 import { setBodyAngle } from "../kinematic";
@@ -54,7 +55,7 @@ export function createBranchGate(options: BranchGateOptions): BranchGateComponen
   const flap = Matter.Bodies.rectangle(options.x, flapY, 46, 8, {
     isStatic: true,
     label: `${label}_flap`,
-    plugin: { color: "#8e44ad" },
+    plugin: { color: STEEL_COLOR, material: "metal", moving: false },
   });
 
   const selector = createRouteSelector({ leftWeight, rightWeight, maxStreak });

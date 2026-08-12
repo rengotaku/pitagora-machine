@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { BIRCH_COLOR, STEEL_COLOR } from "../../config";
 
 export interface SeesawOptions {
   x?: number;
@@ -27,14 +28,14 @@ export function createSeesaw(options: SeesawOptions = {}): SeesawComponent {
 
   const initialAngle = -0.08;
 
-  // シーソーの板
+  // シーソーの板（木部・動くパーツ）
   const board = Matter.Bodies.rectangle(x, y, length, thickness, {
     density: 0.004,
     friction: 0.03,
     restitution: 0.1,
     angle: initialAngle,
     label: "seesaw_board",
-    plugin: { color: "#e67e22" },
+    plugin: { color: BIRCH_COLOR, material: "wood", moving: true },
   });
 
   // 支点 Constraint
@@ -63,7 +64,7 @@ export function createSeesaw(options: SeesawOptions = {}): SeesawComponent {
     {
       density: 0.004,
       label: "seesaw_weight",
-      plugin: { color: "#d35400" },
+      plugin: { color: STEEL_COLOR, material: "metal", moving: true },
     }
   );
 
@@ -81,13 +82,13 @@ export function createSeesaw(options: SeesawOptions = {}): SeesawComponent {
   const stopperLeft = Matter.Bodies.circle(x - length / 2 + 10, y + 36, 12, {
     isStatic: true,
     label: "seesaw_stopper",
-    plugin: { color: "#7f8c8d" },
+    plugin: { color: STEEL_COLOR, material: "metal", moving: false },
   });
 
   const stopperRight = Matter.Bodies.circle(x + length / 2 - 10, y + 42, 12, {
     isStatic: true,
     label: "seesaw_stopper",
-    plugin: { color: "#7f8c8d" },
+    plugin: { color: STEEL_COLOR, material: "metal", moving: false },
   });
 
   // 通過検知用センサー

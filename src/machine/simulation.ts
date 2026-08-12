@@ -1,5 +1,5 @@
 import Matter from "matter-js";
-import { WORLD_HEIGHT, WORLD_WIDTH } from "../config";
+import { BIRCH_SHADOW_COLOR, WORLD_HEIGHT, WORLD_WIDTH } from "../config";
 import { runFixedSteps } from "../lib/frame-scheduler";
 import { createNudgeTracker, type NudgeSample } from "../lib/nudge";
 import { createRng } from "../lib/random";
@@ -183,7 +183,7 @@ export function startSimulation(
   const catcherBackWall = Matter.Bodies.rectangle(1400, 380, 14, 140, {
     isStatic: true,
     label: "catcher_wall",
-    plugin: { color: "#8e44ad" },
+    plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
   });
 
   // 坂 2 からエレベーターへの接続シュート (左463, 694 -> 左287, 730)
@@ -203,7 +203,7 @@ export function startSimulation(
   const elevatorCatchFence = Matter.Bodies.rectangle(205, 735, 12, 150, {
     isStatic: true,
     label: "fence",
-    plugin: { color: "#34495e" },
+    plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
   });
 
   // 5. エレベーター (x=300, bottomY=740, topY=120)
