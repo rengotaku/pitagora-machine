@@ -1,5 +1,6 @@
 import Matter from "matter-js";
 import { WORLD_HEIGHT, WORLD_WIDTH } from "../config";
+import { runFixedSteps } from "../lib/frame-scheduler";
 import { createRng } from "../lib/random";
 import { nextSpawnDelay, shouldSpawnBall } from "../lib/spawn-policy";
 import { createStallTracker, type StallSample } from "../lib/stall";
@@ -284,7 +285,11 @@ export function startSimulation(
 
   updateStats();
 
-  const loop = (now: number): void => {
+  // 1 フレーム分の更新処理。RAF の再予約は行わない (再予約するのは loop() のみ)。
+  // これを直接公開の step() から呼べるようにすることで、手動 step() 呼び出しのたびに
+  // 新しい requestAnimationFrame が予約され、既存の自動ループと並行して物理・投入が
+  // 多重に進行してしまう問題を防ぐ (レビュー指摘 #2)。
+  const tick = (now: number): void => {
     if (!running) return;
 
     const frameDelta = Math.max(0, now - lastTime);
@@ -307,19 +312,29 @@ export function startSimulation(
     // 停滞検知が「数秒間動いていない」と誤判定して全ボールを回収したり、投入間隔だけ
     // 進んで復帰直後にボールが増えたりする。
     const { steps, effectiveMs } = timestepCalc.update(frameDelta);
-    for (let i = 0; i < steps; i += 1) {
-      Matter.Engine.update(engine, fixedDeltaMs);
-    }
+
+    // launcher のセンサー通過判定・elevator のキャリア駆動と受け渡しは、ボディの位置に
+    // 依存する検知・駆動であり、物理更新と同じ 1 ステップ (fixedDeltaMs) 単位で評価する
+    // 必要がある。ループの外でフレームにつき 1 回 (effectiveMs 分まとめて) 評価すると、
+    // 低 FPS やタブ復帰で steps が複数になったとき、物理だけがまとめて進んだ後に装置状態が
+    // 1 回しか評価されず、ボールが launcher センサーを検知されずに通過したり、elevator が
+    // 複数ステップ分の駆動時間を一度に処理してボールを取りこぼしたりして、装置の循環が
+    // 止まりうる (レビュー指摘 #1)。停滞検知・投入間隔・統計・描画は「一定時間の変位」や
+    // 積算値で判定する性質のためフレーム 1 回のままでよい。
+    runFixedSteps(steps, fixedDeltaMs, {
+      onPhysicsStep: (dt) => Matter.Engine.update(engine, dt),
+      onDeviceStep: (dt) => {
+        launcher.update(engine, () => {
+          gimmicks.launcher += 1;
+        });
+
+        elevator.update(engine, dt, () => {
+          gimmicks.elevator += 1;
+        });
+      },
+    });
 
     msSinceLastSpawn += effectiveMs;
-
-    launcher.update(engine, () => {
-      gimmicks.launcher += 1;
-    });
-
-    elevator.update(engine, effectiveMs, () => {
-      gimmicks.elevator += 1;
-    });
 
     const currentBalls = Matter.Composite.allBodies(engine.world).filter(
       (b) => b.label === "ball"
@@ -429,8 +444,14 @@ export function startSimulation(
     updateStats();
 
     renderWorld(ctx, engine, transform, cssWidth, cssHeight);
+  };
 
-    if (typeof requestAnimationFrame !== "undefined") {
+  // RAF から駆動する自動ループ。1 フレーム分の更新 (tick) を実行した後、まだ稼働中なら
+  // 次のフレームを予約する。RAF の再予約はここでのみ行う。
+  const loop = (now: number): void => {
+    tick(now);
+
+    if (running && typeof requestAnimationFrame !== "undefined") {
       animId = requestAnimationFrame(loop);
     }
   };
@@ -455,8 +476,10 @@ export function startSimulation(
       }
     },
     step(deltaMs: number): void {
+      // tick() を直接呼ぶ (loop() は呼ばない)。loop() を呼ぶと呼び出しのたびに新しい
+      // requestAnimationFrame が予約され、既存の自動ループと並行して進行してしまう。
       const now = lastTime + deltaMs;
-      loop(now);
+      tick(now);
     },
   };
 }
