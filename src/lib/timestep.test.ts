@@ -141,4 +141,19 @@ describe("timestep: effectiveMs (レビュー指摘 #2 回帰テスト)", () => 
     expect(result.steps).toBe(0);
     expect(result.effectiveMs).toBe(0);
   });
+
+  it("maxStepsPerFrame に非整数を渡すと例外を投げる", () => {
+    // 非整数を許すと打ち切り時に steps が小数になり、呼び出し側の
+    // `for (i < steps)` が回る回数（切り上げ）と effectiveMs（小数ステップ分）が
+    // 食い違って、物理時間と装置側ロジックの時間がずれる。
+    expect(() =>
+      createTimestepCalculator({ fixedDeltaMs: 16.666, maxStepsPerFrame: 2.5 })
+    ).toThrow(/正の整数/);
+    expect(() =>
+      createTimestepCalculator({
+        fixedDeltaMs: 16.666,
+        maxStepsPerFrame: Number.NaN,
+      })
+    ).toThrow(/正の整数/);
+  });
 });

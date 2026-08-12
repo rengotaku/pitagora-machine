@@ -41,13 +41,16 @@ export function createTimestepCalculator(options: TimestepOptions): TimestepCalc
     throw new Error(`fixedDeltaMs は正の有限数値である必要があります: ${fixedDeltaMs}`);
   }
 
+  // 非整数を許すと、打ち切り時に steps が小数になる。呼び出し側の
+  // `for (i < steps)` は切り上げ回数だけ物理を進める一方 effectiveMs は
+  // 小数ステップ分になり、物理時間と装置側ロジックの時間がずれる。
   if (
     typeof maxStepsPerFrame !== "number" ||
-    !Number.isFinite(maxStepsPerFrame) ||
+    !Number.isInteger(maxStepsPerFrame) ||
     maxStepsPerFrame <= 0
   ) {
     throw new Error(
-      `maxStepsPerFrame は正の有限数値である必要があります: ${maxStepsPerFrame}`
+      `maxStepsPerFrame は正の整数である必要があります: ${maxStepsPerFrame}`
     );
   }
 
