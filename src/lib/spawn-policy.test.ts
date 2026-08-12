@@ -63,10 +63,38 @@ describe("spawn-policy (TC-15 ~ TC-20)", () => {
     expect(delay).toBe(2000);
   });
 
-  it("追加テスト: shouldSpawnBall がオーバーロード引数（数値並び）でも正しく動作する / シグネチャ互換性の確認", () => {
-    expect(shouldSpawnBall(0, 0, 2000, 6)).toBe(true);
-    expect(shouldSpawnBall(6, 5000, 2000, 6)).toBe(false);
-    expect(shouldSpawnBall(3, 1000, 2000, 6)).toBe(false);
-    expect(shouldSpawnBall(3, 2000, 2000, 6)).toBe(true);
+  it("追加テスト: shouldSpawnBall が SpawnCheckParams オブジェクトで正しく動作する / シグネチャ確認", () => {
+    expect(
+      shouldSpawnBall({
+        activeBalls: 0,
+        msSinceLastSpawn: 0,
+        nextDelayMs: 2000,
+        maxActiveBalls: 6,
+      })
+    ).toBe(true);
+    expect(
+      shouldSpawnBall({
+        activeBalls: 6,
+        msSinceLastSpawn: 5000,
+        nextDelayMs: 2000,
+        maxActiveBalls: 6,
+      })
+    ).toBe(false);
+    expect(
+      shouldSpawnBall({
+        activeBalls: 3,
+        msSinceLastSpawn: 1000,
+        nextDelayMs: 2000,
+        maxActiveBalls: 6,
+      })
+    ).toBe(false);
+    expect(
+      shouldSpawnBall({
+        activeBalls: 3,
+        msSinceLastSpawn: 2000,
+        nextDelayMs: 2000,
+        maxActiveBalls: 6,
+      })
+    ).toBe(true);
   });
 });

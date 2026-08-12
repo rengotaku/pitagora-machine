@@ -18,45 +18,16 @@ export interface SpawnCheckParams {
  * - 画面内のボール数が上限 (activeBalls >= maxActiveBalls) に達している場合は false を返す。
  * - それ以外は直前投入からの経過時間 (msSinceLastSpawn) が nextDelayMs 以上経過していれば true を返す。
  */
-export function shouldSpawnBall(params: SpawnCheckParams): boolean;
-export function shouldSpawnBall(
-  activeBalls: number,
-  msSinceLastSpawn: number,
-  nextDelayMs: number,
-  maxActiveBalls: number
-): boolean;
-export function shouldSpawnBall(
-  arg1: SpawnCheckParams | number,
-  arg2?: number,
-  arg3?: number,
-  arg4?: number
-): boolean {
-  let activeBalls: number;
-  let msSinceLastSpawn: number;
-  let nextDelayMs: number;
-  let maxActiveBalls: number;
-
-  if (typeof arg1 === "object") {
-    activeBalls = arg1.activeBalls;
-    msSinceLastSpawn = arg1.msSinceLastSpawn;
-    nextDelayMs = arg1.nextDelayMs;
-    maxActiveBalls = arg1.maxActiveBalls;
-  } else {
-    activeBalls = arg1;
-    msSinceLastSpawn = arg2!;
-    nextDelayMs = arg3!;
-    maxActiveBalls = arg4!;
-  }
-
-  if (activeBalls <= 0) {
+export function shouldSpawnBall(params: SpawnCheckParams): boolean {
+  if (params.activeBalls <= 0) {
     return true;
   }
 
-  if (activeBalls >= maxActiveBalls) {
+  if (params.activeBalls >= params.maxActiveBalls) {
     return false;
   }
 
-  return msSinceLastSpawn >= nextDelayMs;
+  return params.msSinceLastSpawn >= params.nextDelayMs;
 }
 
 /**
