@@ -2,11 +2,15 @@ import Matter from "matter-js";
 import { WORLD_HEIGHT, WORLD_WIDTH } from "../config";
 import { createRng } from "../lib/random";
 import { nextSpawnDelay, shouldSpawnBall } from "../lib/spawn-policy";
+import { createStallTracker, type StallSample } from "../lib/stall";
 import { createTimestepCalculator } from "../lib/timestep";
 import { fitWorldToCanvas, type ViewportTransform } from "../lib/viewport";
 import { renderWorld } from "../render/renderer";
-import { createBall } from "./ball";
+import { createBall, getBallData } from "./ball";
+import { createElevator } from "./parts/elevator";
+import { createLauncher } from "./parts/launcher";
 import { createRamp } from "./parts/ramp";
+import { createSeesaw } from "./parts/seesaw";
 import { createPitagoraWorld } from "./world";
 
 export interface SimulationConfig {
@@ -16,55 +20,182 @@ export interface SimulationConfig {
   maxStepsPerFrame?: number;
   minSpawnDelayMs?: number;
   maxSpawnDelayMs?: number;
+  stallDurationMs?: number;
 }
 
 export interface SimulationInstance {
   stop(): void;
+  step?(deltaMs: number): void;
 }
 
-/**
- * ピタゴラ装置のシミュレーションとメインループを起動する。
- */
 export function startSimulation(
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
   config: SimulationConfig = {}
 ): SimulationInstance {
-  const maxActiveBalls = config.maxActiveBalls ?? 6;
+  // 発射装置から ramp2 への着地後、坂の勾配 (重力加速度) だけでは速度の回復が
+  // 緩やかなため、同時稼働数・投入間隔を抑えて launcher〜ramp2 付近での
+  // 団子化 (3個以上の滞留) を避ける
+  const maxActiveBalls = config.maxActiveBalls ?? 4;
   const seed = config.seed ?? 12345;
   const fixedDeltaMs = config.fixedDeltaMs ?? 16.666;
   const maxStepsPerFrame = config.maxStepsPerFrame ?? 5;
-  const minSpawnDelayMs = config.minSpawnDelayMs ?? 1500;
-  const maxSpawnDelayMs = config.maxSpawnDelayMs ?? 4000;
+  const minSpawnDelayMs = config.minSpawnDelayMs ?? 4200;
+  const maxSpawnDelayMs = config.maxSpawnDelayMs ?? 6500;
+  const stallDurationMs = config.stallDurationMs ?? 4500;
 
   const rng = createRng(seed);
   const { engine } = createPitagoraWorld();
+
   const timestepCalc = createTimestepCalculator({
     fixedDeltaMs,
     maxStepsPerFrame,
   });
 
-  // 坂パーツの配置（投入口から床まで転がるジグザグコース）
-  const ramp1 = createRamp({
-    x: 450,
-    y: 220,
-    length: 750,
-    angle: 0.18,
-  });
-  const ramp2 = createRamp({
-    x: 1150,
-    y: 440,
-    length: 750,
-    angle: -0.18,
-  });
-  const ramp3 = createRamp({
-    x: 450,
-    y: 660,
-    length: 750,
-    angle: 0.18,
+  const stallTracker = createStallTracker({
+    minTravelDistance: 20,
+    stallDurationMs,
   });
 
-  Matter.Composite.add(engine.world, [ramp1, ramp2, ramp3]);
+  // --- コースパーツの配置 ---
+
+  // 1. 坂 1 (左210, 125 -> 右830, 305)
+  const ramp1 = createRamp({
+    x: 520,
+    y: 215,
+    length: 650,
+    angle: 0.28,
+    friction: 0.001,
+    hasGuard: true,
+    guardHeight: 12,
+    label: "ramp1",
+  });
+
+  // 2. シーソー (支点 900, 350, 長さ 260)
+  const seesaw = createSeesaw({
+    x: 900,
+    y: 350,
+    length: 260,
+  });
+
+  // 坂1右端 (832, 305) からシーソー支点 (900) を越えた位置 (936, 329) への接続シュート。
+  // 支点より左側にボールを着地させると常に左下がりトルクしか発生せず傾かないため、
+  // 支点を越えた位置へ導いて着地直後から右を沈めるトルクを発生させる。
+  // 右端をシーソー board 初期姿勢の上面 (y≈339) より約 10px 上に離し、静止状態で
+  // board と重ならないようにする (めり込むと Matter.js の押し戻しでシーソーの初期姿勢が
+  // 開始直後に暴れて右へ傾いたまま戻らなくなる)。勾配は緩めすぎるとボールが途中で
+  // 失速して団子状に止まるため、十分に転がり落ちる角度を確保する。
+  const ramp1ToSeesawChute = createRamp({
+    x: 884.1,
+    y: 317,
+    length: 106.3,
+    angle: 0.231,
+    friction: 0.001,
+    hasGuard: true,
+    label: "chute0",
+  });
+
+  // シーソー右端付近 (1000, 385) から launcher sensor 内 (1160, 425) への接続シュート。
+  // 旧配置は sensor 手前で自由落下する区間があり、水平速度がほとんど無いまま
+  // 真下の ramp2 (x=1140 で上面 y≈458) に着地して止まっていた。
+  // 右端を sensor 範囲内・ramp2 上面から 26px 以上離れた高さに置き、
+  // friction を高めて速度を落とすことで、坂を降りたボールが確実に sensor 内へ
+  // 入るようにする。
+  const seesawToLauncherChute = createRamp({
+    x: 1080,
+    y: 405,
+    length: 164.9,
+    angle: 0.244,
+    friction: 0.03,
+    label: "chute1",
+  });
+
+  // 3. 発射装置 (1140, 460 付近 -> 右上へ打ち出し、ramp2 (1216, 424 付近) へ着地)
+  // 強すぎる初速度 (旧 vx20,vy-15) だと放物線が WORLD_WIDTH(1600) を越え、
+  // catcherBackWall に直撃して跳ね返り、再度 launcher sensor へ落ちて再発射される
+  // 無限ループの原因になっていた (孤立シミュレーションで実測)。
+  // 着地点は ramp2 右端 (x=1316.5) から十分な余裕 (100px 前後) を持たせる必要がある。
+  // 余裕が無いと、着地後の残速度で坂の外へ滑り出してしまう。
+  const launcher = createLauncher({
+    x: 1140,
+    y: 460,
+    launchVx: 5.5,
+    launchVy: -4.2,
+  });
+
+  // 4. 坂 2 (右1320, 410 -> 左460, 690)
+  const ramp2 = createRamp({
+    x: 890,
+    y: 550,
+    length: 900,
+    angle: -0.325,
+    friction: 0.001,
+    hasGuard: true,
+    guardHeight: 12,
+    label: "ramp2",
+  });
+
+  // 発射されたボールを受けるキャッチャー背面壁。ramp2 着地点 (1216 付近、
+  // 複数ボールが同時稼働する実環境では衝突で右へ弾かれることもある) から
+  // 適度に離しつつ、弾かれたボールが画面外や床まで落ちないよう受け止める高さを確保する
+  const catcherBackWall = Matter.Bodies.rectangle(1400, 380, 14, 140, {
+    isStatic: true,
+    label: "catcher_wall",
+    plugin: { color: "#8e44ad" },
+  });
+
+  // 坂 2 からエレベーターへの接続シュート (左463, 694 -> 左287, 730)
+  // ボールがエレベーターの受け皿を飛び越えないよう、勾配を緩め坂2本体より摩擦を上げて減速させる
+  const ramp2ToElevatorChute = createRamp({
+    x: 375.3,
+    y: 711.6,
+    length: 180,
+    angle: -0.2,
+    friction: 0.05,
+    hasGuard: true,
+    label: "chute2",
+  });
+
+  // 床脱落防止ガード（エレベーター周り）
+  // エレベーター受け皿左壁 (x=230) の外側に配置し、飛び越えたボールを最終的に受け止める
+  const elevatorCatchFence = Matter.Bodies.rectangle(205, 735, 12, 150, {
+    isStatic: true,
+    label: "fence",
+    plugin: { color: "#34495e" },
+  });
+
+  // 5. エレベーター (x=300, bottomY=740, topY=120)
+  const elevator = createElevator({
+    x: 300,
+    bottomY: 740,
+    topY: 120,
+    speed: 300,
+  });
+
+  // エレベーター上部から坂1への受け渡しガイド
+  const elevatorToRamp1Guide = createRamp({
+    x: 260,
+    y: 115,
+    length: 90,
+    angle: 0.28,
+    friction: 0.001,
+    label: "guide_top",
+  });
+
+  Matter.Composite.add(engine.world, [
+    ...ramp1.bodies,
+    ...ramp1ToSeesawChute.bodies,
+    ...seesaw.bodies,
+    ...seesawToLauncherChute.bodies,
+    ...launcher.bodies,
+    ...ramp2.bodies,
+    catcherBackWall,
+    ...ramp2ToElevatorChute.bodies,
+    elevatorCatchFence,
+    ...elevator.bodies,
+    ...elevatorToRamp1Guide.bodies,
+  ]);
+  Matter.Composite.add(engine.world, seesaw.constraints);
 
   let transform: ViewportTransform = fitWorldToCanvas(WORLD_WIDTH, WORLD_HEIGHT, 1, 1);
   let cssWidth = window.innerWidth || 1600;
@@ -89,15 +220,27 @@ export function startSimulation(
     resize();
   }
 
-  // シミュレーション状態
   let lastTime = typeof performance !== "undefined" ? performance.now() : 0;
   let elapsedMs = 0;
   let msSinceLastSpawn = 0;
   let nextDelayMs = nextSpawnDelay(rng, minSpawnDelayMs, maxSpawnDelayMs);
   let minActiveBalls = Infinity;
+  let recoveredBalls = 0;
+  let outOfBoundsBalls = 0;
   let hasSpawned = false;
 
-  // FPS 計算用
+  const gimmicks = {
+    ramp1: 0,
+    seesaw: 0,
+    launcher: 0,
+    ramp2: 0,
+    elevator: 0,
+  };
+
+  const countedRamp1 = new Set<number>();
+  const countedSeesaw = new Set<number>();
+  const countedRamp2 = new Set<number>();
+
   let frameCount = 0;
   let fpsTimer = 0;
   let currentFps = 60;
@@ -106,15 +249,15 @@ export function startSimulation(
   let running = true;
 
   const spawnBall = (): void => {
-    // 投入口 (x=160, y=80) 付近
-    const ballX = 160 + (rng() * 20 - 10);
-    const ballY = 80;
+    const ballX = 230 + (rng() * 10 - 5);
+    const ballY = 70;
     const ball = createBall(rng, ballX, ballY);
+    // 右下向きの初期速度を与えて投入口でのスタックを防止
+    Matter.Body.setVelocity(ball, { x: 3.5, y: 1.5 });
     Matter.Composite.add(engine.world, ball);
     hasSpawned = true;
   };
 
-  // 初回判定と初期状態セット
   const updateStats = (): void => {
     const allBodies = Matter.Composite.allBodies(engine.world);
     const balls = allBodies.filter((b) => b.label === "ball");
@@ -132,6 +275,9 @@ export function startSimulation(
         minActiveBalls: currentMin,
         fps: currentFps,
         elapsedMs,
+        recoveredBalls,
+        outOfBoundsBalls,
+        gimmicks: { ...gimmicks },
       };
     }
   };
@@ -147,7 +293,6 @@ export function startSimulation(
     elapsedMs += frameDelta;
     msSinceLastSpawn += frameDelta;
 
-    // FPS 計算
     frameCount += 1;
     fpsTimer += frameDelta;
     if (fpsTimer >= 500) {
@@ -156,21 +301,114 @@ export function startSimulation(
       fpsTimer = 0;
     }
 
-    // 固定タイムステップで物理計算を進める
     const { steps } = timestepCalc.update(frameDelta);
     for (let i = 0; i < steps; i += 1) {
       Matter.Engine.update(engine, fixedDeltaMs);
     }
 
-    // ボール数のカウント
-    const allBodies = Matter.Composite.allBodies(engine.world);
-    const balls = allBodies.filter((b) => b.label === "ball");
-    const activeBalls = balls.length;
+    launcher.update(engine, () => {
+      gimmicks.launcher += 1;
+    });
 
-    // ボール投入判定
+    elevator.update(engine, frameDelta, () => {
+      gimmicks.elevator += 1;
+    });
+
+    const currentBalls = Matter.Composite.allBodies(engine.world).filter(
+      (b) => b.label === "ball"
+    );
+
+    for (const ball of currentBalls) {
+      const data = getBallData(ball);
+      if (!data) continue;
+      const id = data.id;
+
+      if (
+        !countedRamp1.has(id) &&
+        Matter.Bounds.overlaps(ramp1.sensor.bounds, ball.bounds)
+      ) {
+        countedRamp1.add(id);
+        gimmicks.ramp1 += 1;
+      }
+
+      if (
+        !countedSeesaw.has(id) &&
+        Matter.Bounds.overlaps(seesaw.sensor.bounds, ball.bounds)
+      ) {
+        countedSeesaw.add(id);
+        gimmicks.seesaw += 1;
+      }
+
+      if (
+        !countedRamp2.has(id) &&
+        Matter.Bounds.overlaps(ramp2.sensor.bounds, ball.bounds)
+      ) {
+        countedRamp2.add(id);
+        gimmicks.ramp2 += 1;
+      }
+    }
+
+    // 1. フェイルセーフ (画面外回収)
+    for (const ball of currentBalls) {
+      const { x, y } = ball.position;
+      const isOutOfBounds =
+        x < -60 || x > WORLD_WIDTH + 60 || y < -60 || y > WORLD_HEIGHT + 60;
+
+      if (isOutOfBounds) {
+        const data = getBallData(ball);
+        if (data) {
+          stallTracker.forget(data.id);
+          countedRamp1.delete(data.id);
+          countedSeesaw.delete(data.id);
+          countedRamp2.delete(data.id);
+        }
+        Matter.Composite.remove(engine.world, ball);
+        outOfBoundsBalls += 1;
+        spawnBall();
+      }
+    }
+
+    // 2. スタック検知
+    const validBalls = Matter.Composite.allBodies(engine.world).filter(
+      (b) => b.label === "ball"
+    );
+    const samples: StallSample[] = [];
+    const ballMap = new Map<number, Matter.Body>();
+
+    for (const ball of validBalls) {
+      const data = getBallData(ball);
+      if (data) {
+        samples.push({ id: data.id, x: ball.position.x, y: ball.position.y });
+        ballMap.set(data.id, ball);
+      }
+    }
+
+    const stalledIds = stallTracker.update(samples, frameDelta);
+
+    for (const stalledId of stalledIds) {
+      const targetBall = ballMap.get(stalledId);
+      if (targetBall) {
+        console.log(
+          `[Stall Detected] ballId=${stalledId} at x=${Math.round(targetBall.position.x)}, y=${Math.round(targetBall.position.y)}`
+        );
+        Matter.Composite.remove(engine.world, targetBall);
+        stallTracker.forget(stalledId);
+        countedRamp1.delete(stalledId);
+        countedSeesaw.delete(stalledId);
+        countedRamp2.delete(stalledId);
+        recoveredBalls += 1;
+        spawnBall();
+      }
+    }
+
+    // 3. ボール投入制御
+    const currentActiveBalls = Matter.Composite.allBodies(engine.world).filter(
+      (b) => b.label === "ball"
+    ).length;
+
     if (
       shouldSpawnBall({
-        activeBalls,
+        activeBalls: currentActiveBalls,
         msSinceLastSpawn,
         nextDelayMs,
         maxActiveBalls,
@@ -183,7 +421,6 @@ export function startSimulation(
 
     updateStats();
 
-    // Canvas 2D 描画
     renderWorld(ctx, engine, transform, cssWidth, cssHeight);
 
     if (typeof requestAnimationFrame !== "undefined") {
@@ -191,7 +428,6 @@ export function startSimulation(
     }
   };
 
-  // 即時初回フレーム実行（テスト環境やアニメーション開始）
   spawnBall();
   msSinceLastSpawn = 0;
   nextDelayMs = nextSpawnDelay(rng, minSpawnDelayMs, maxSpawnDelayMs);
@@ -210,6 +446,10 @@ export function startSimulation(
       if (typeof window !== "undefined" && window.removeEventListener) {
         window.removeEventListener("resize", resize);
       }
+    },
+    step(deltaMs: number): void {
+      const now = lastTime + deltaMs;
+      loop(now);
     },
   };
 }

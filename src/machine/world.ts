@@ -10,8 +10,11 @@ export interface PitagoraWorld {
  * 論理ワールド 1600x900 の外周（左右の壁・最下部の床）を構築する。
  */
 export function createPitagoraWorld(): PitagoraWorld {
+  // constraintIterations を既定 (4) より増やし、シーソーの支点・カウンターウェイトのような
+  // 硬い constraint 同士が連なる箇所での数値的な不安定 (意図しない急激な回転) を抑える。
   const engine = Matter.Engine.create({
     gravity: { x: 0, y: 1, scale: 0.001 },
+    constraintIterations: 10,
   });
 
   const wallThickness = 60;
