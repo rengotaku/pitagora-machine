@@ -28,6 +28,8 @@ export interface DominoRowComponent {
     onPass?: (ballId: number) => void,
     onRecovered?: () => void
   ): void;
+  /** 全ドミノを起立状態 (restStates) へ戻し、通過検知・復帰待ちタイマーも初期化する。 */
+  reset(): void;
 }
 
 /** 角度差を [-π, π] へ正規化する (ドミノが何周も回転しても誤判定しないため)。 */
@@ -131,6 +133,18 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
   const passedBalls = new Set<number>();
   let msSinceLastContact = recoveryWaitMs;
 
+  /** 全ドミノを restStates (起立時の位置・角度) へ戻し、速度も 0 にする。 */
+  const raiseAllDominoes = (): void => {
+    for (let i = 0; i < dominoes.length; i += 1) {
+      const domino = dominoes[i];
+      const rest = restStates[i];
+      Matter.Body.setPosition(domino, { x: rest.x, y: rest.y });
+      Matter.Body.setAngle(domino, rest.angle);
+      Matter.Body.setVelocity(domino, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(domino, 0);
+    }
+  };
+
   return {
     bodies: [platform, ...dominoes, sensor],
     dominoes,
@@ -188,16 +202,14 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
       });
 
       if (shouldRecover && fallenCount > 0) {
-        for (let i = 0; i < dominoes.length; i += 1) {
-          const domino = dominoes[i];
-          const rest = restStates[i];
-          Matter.Body.setPosition(domino, { x: rest.x, y: rest.y });
-          Matter.Body.setAngle(domino, rest.angle);
-          Matter.Body.setVelocity(domino, { x: 0, y: 0 });
-          Matter.Body.setAngularVelocity(domino, 0);
-        }
+        raiseAllDominoes();
         onRecovered?.();
       }
+    },
+    reset(): void {
+      raiseAllDominoes();
+      passedBalls.clear();
+      msSinceLastContact = recoveryWaitMs;
     },
   };
 }

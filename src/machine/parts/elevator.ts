@@ -23,6 +23,11 @@ export interface ElevatorComponent {
    * 押し出し(nudge)や停滞検知の対象から外す必要がある。
    */
   isHolding(ballId: number): boolean;
+  /**
+   * 状態機械・キャリア位置を生成直後の状態 (底で待機中) に戻す。
+   * ボール側の後始末 (回収) は呼び出し側 (simulation.ts) の責務。
+   */
+  reset(): void;
 }
 
 /**
@@ -244,6 +249,16 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
           break;
         }
       }
+    },
+    reset(): void {
+      // 状態機械を生成直後 (底で待機中) に戻し、キャリアの位置も即座に反映する。
+      // updatePositions を呼ばないと、次の update() が呼ばれるまで carrier が
+      // 前回の高さのまま表示され続けてしまう。
+      state = "waiting_bottom";
+      stateTimer = 0;
+      dispensedBalls.clear();
+      heldBallIds.clear();
+      updatePositions(bottomY);
     },
   };
 }

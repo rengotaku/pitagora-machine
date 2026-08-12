@@ -28,4 +28,30 @@ describe("branch-gate", () => {
     expect(choices.length).toBe(1);
     expect(["left", "right"]).toContain(choices[0]);
   });
+
+  it("reset() でフラップが中立位置に戻り、判定済み記録がクリアされる (レビュー指摘 #2 回帰テスト)", () => {
+    const gate = createBranchGate({ x: 380, y: 165, width: 120, height: 100 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(1), 380, 165);
+    Matter.Body.setVelocity(ball, { x: 3, y: 1 });
+    Matter.Composite.add(engine.world, [gate.sensor, gate.flap, ball]);
+
+    const rng = createRng(42);
+    let choices = 0;
+    gate.update(engine, rng, () => {
+      choices += 1;
+    });
+    expect(choices).toBe(1);
+    expect(gate.flap.angle).not.toBe(0);
+
+    gate.reset();
+
+    expect(gate.flap.angle).toBeCloseTo(0, 5);
+
+    // 判定済み記録がクリアされているため、同じボール ID でも再度判定される
+    gate.update(engine, rng, () => {
+      choices += 1;
+    });
+    expect(choices).toBe(2);
+  });
 });

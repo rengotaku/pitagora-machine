@@ -20,6 +20,8 @@ export interface PendulumComponent {
   bodies: Matter.Body[];
   sensor: Matter.Body;
   update(engine: Matter.Engine, deltaMs: number, onHit?: (ballId: number) => void): void;
+  /** 振動の位相を 0 (振り子が真下で静止する角度) へ戻し、腕・おもりの位置も即座に反映する。 */
+  reset(): void;
 }
 
 /**
@@ -79,6 +81,18 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
   const hitBalls = new Set<number>();
   let elapsedMs = 0;
 
+  /** 指定した角度に腕・おもりの位置を反映する (update()/reset() で共有)。 */
+  const applyAngle = (angle: number): void => {
+    const bobX = pivotX + armLength * Math.sin(angle);
+    const bobY = pivotY + armLength * Math.cos(angle);
+    setBodyPosition(bob, { x: bobX, y: bobY }, true);
+
+    const rodX = pivotX + (armLength / 2) * Math.sin(angle);
+    const rodY = pivotY + (armLength / 2) * Math.cos(angle);
+    setBodyPosition(rod, { x: rodX, y: rodY }, true);
+    setBodyAngle(rod, angle, true);
+  };
+
   return {
     bodies: [pivot, rod, bob, sensor],
     sensor,
@@ -90,15 +104,7 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
       elapsedMs += deltaMs;
       const phase = (2 * Math.PI * elapsedMs) / periodMs;
       const angle = amplitudeRad * Math.sin(phase);
-
-      const bobX = pivotX + armLength * Math.sin(angle);
-      const bobY = pivotY + armLength * Math.cos(angle);
-      setBodyPosition(bob, { x: bobX, y: bobY }, true);
-
-      const rodX = pivotX + (armLength / 2) * Math.sin(angle);
-      const rodY = pivotY + (armLength / 2) * Math.cos(angle);
-      setBodyPosition(rod, { x: rodX, y: rodY }, true);
-      setBodyAngle(rod, angle, true);
+      applyAngle(angle);
 
       const balls = Matter.Composite.allBodies(engine.world).filter(
         (b) => b.label === "ball"
@@ -115,6 +121,11 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
           hitBalls.delete(ballId);
         }
       }
+    },
+    reset(): void {
+      elapsedMs = 0;
+      hitBalls.clear();
+      applyAngle(0);
     },
   };
 }

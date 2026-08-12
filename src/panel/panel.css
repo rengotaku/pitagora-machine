@@ -1,0 +1,192 @@
+/**
+ * デバッグ設定パネル (issue #6) のスタイル。
+ * 装置本体のデザイントークン (issue #5 / src/config.ts) に調和させ、
+ * 通常時は設定ボタンだけが見える控えめな見た目にする。
+ */
+
+:root {
+  --pg-stage: #e9eef0;
+  --pg-birch: #e0b877;
+  --pg-steel: #9aa7ad;
+  --pg-ink: #3b4348;
+}
+
+.pg-panel-toggle {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--pg-steel);
+  background: #ffffff;
+  color: var(--pg-ink);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(59, 67, 72, 0.2);
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.pg-panel-toggle:hover {
+  background: var(--pg-stage);
+}
+
+.pg-panel-toggle:active {
+  transform: scale(0.94);
+}
+
+.pg-panel-toggle:focus-visible {
+  outline: 2px solid var(--pg-ink);
+  outline-offset: 2px;
+}
+
+.pg-panel {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 20;
+  width: 240px;
+  padding: 14px 16px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--pg-steel);
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(59, 67, 72, 0.18);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  color: var(--pg-ink);
+  transform-origin: top right;
+}
+
+.pg-panel[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pg-panel {
+    animation: pg-panel-in 0.15s ease;
+  }
+}
+
+@keyframes pg-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.pg-panel-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pg-ink);
+}
+
+.pg-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.pg-panel-row label {
+  flex: 0 0 auto;
+  min-width: 56px;
+}
+
+.pg-panel-row input[type="range"] {
+  flex: 1 1 auto;
+  accent-color: var(--pg-steel);
+}
+
+.pg-panel-row input[type="range"]:focus-visible,
+.pg-panel-row input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--pg-ink);
+  outline-offset: 2px;
+}
+
+.pg-panel-value {
+  flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.pg-panel-row--checkbox {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.pg-panel-reset {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 0;
+  border-radius: 6px;
+  border: 1px solid var(--pg-steel);
+  background: var(--pg-stage);
+  color: var(--pg-ink);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pg-panel-reset:hover {
+  background: #dfe6e9;
+}
+
+.pg-panel-reset:focus-visible {
+  outline: 2px solid var(--pg-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-panel-toggle {
+    transition: none;
+  }
+
+  .pg-panel-toggle:active {
+    transform: none;
+  }
+}
+
+/* --- デバッグ HUD (fps・ボール数・回収回数・仕掛け作動回数) --- */
+
+.pg-debug-hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 15;
+  margin: 0;
+  padding: 10px 12px;
+  max-width: 42vw;
+  max-height: 80vh;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgba(59, 67, 72, 0.82);
+  color: #f4f6f7;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.pg-debug-hud[hidden] {
+  display: none;
+}
