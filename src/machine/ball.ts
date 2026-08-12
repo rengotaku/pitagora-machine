@@ -17,13 +17,12 @@ export function resetBallIdCounter(): void {
   nextBallId = 1;
 }
 
+// issue #5 で確定したデザイントークン。原色を避けた少しくすんだ玩具色。
 const BALL_COLORS = [
-  "#e74c3c", // 赤
-  "#3498db", // 青
-  "#2ecc71", // 緑
-  "#f1c40f", // 黄
-  "#9b59b6", // 紫
-  "#e67e22", // オレンジ
+  "#e8552f", // くすんだ朱色
+  "#f2b134", // くすんだ黄色
+  "#2e8bc0", // くすんだ青
+  "#6bbf59", // くすんだ緑
 ];
 
 /**
@@ -37,9 +36,15 @@ export function createBall(rng: Rng, x: number, y: number): Matter.Body {
 
   const variation = generateBallVariation(rng, BALL_COLORS);
 
+  // 色だけは乱数に任せず順に使う。同時に流れるのは 5 個程度しかないため、
+  // 乱数だと画面上が 2 色に偏って「カラフル」に見えないことが実測で分かった
+  // （シードが固定なので偏り方も毎回同じになる）。サイズ・反発・密度の
+  // ばらつきは従来どおり乱数から決める。
+  const color = BALL_COLORS[id % BALL_COLORS.length];
+
   const ballData: BallUserData = {
     id,
-    color: variation.color,
+    color,
     radius: variation.radius,
   };
 

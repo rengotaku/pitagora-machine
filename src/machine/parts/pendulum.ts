@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { STEEL_COLOR } from "../../config";
 import { setBodyAngle, setBodyPosition } from "../kinematic";
 
 export interface PendulumOptions {
@@ -32,7 +33,7 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
   const bobRadius = options.bobRadius ?? 15;
   const periodMs = options.periodMs ?? 2100;
   const amplitudeRad = options.amplitudeRad ?? 0.75;
-  const color = options.color ?? "#2980b9";
+  const color = options.color ?? STEEL_COLOR;
   const label = options.label ?? "pendulum";
   const pivotX = options.pivotX;
   const pivotY = options.pivotY;
@@ -40,13 +41,13 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
   const pivot = Matter.Bodies.circle(pivotX, pivotY, 5, {
     isStatic: true,
     label: "pendulum_pivot",
-    plugin: { color: "#7f8c8d" },
+    plugin: { color: STEEL_COLOR, material: "metal", moving: false },
   });
 
   const rod = Matter.Bodies.rectangle(pivotX, pivotY + armLength / 2, 4, armLength, {
     isStatic: true,
     label: "pendulum_rod",
-    plugin: { color: "#7f8c8d" },
+    plugin: { color: STEEL_COLOR, material: "metal", moving: true },
   });
 
   // isStatic な Body は Matter.js 内部で restitution が強制的に 0 に上書きされる
@@ -56,7 +57,7 @@ export function createPendulum(options: PendulumOptions): PendulumComponent {
   const bob = Matter.Bodies.circle(pivotX, pivotY + armLength, bobRadius, {
     isStatic: true,
     label,
-    plugin: { color },
+    plugin: { color, material: "metal", moving: true },
   });
 
   const sensorWidth =

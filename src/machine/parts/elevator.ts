@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { BIRCH_COLOR, STEEL_COLOR } from "../../config";
 
 export interface ElevatorOptions {
   x?: number;
@@ -33,7 +34,7 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   const bottomY = options.bottomY ?? 760;
   const topY = options.topY ?? 130;
   const speed = options.speed ?? 300;
-  const color = options.color ?? "#16a085";
+  const color = options.color ?? BIRCH_COLOR;
 
   let currentY = bottomY;
   let state: "waiting_bottom" | "moving_up" | "dispensing" | "moving_down" =
@@ -47,14 +48,14 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   const carrierBase = Matter.Bodies.rectangle(x, currentY + 24, 150, 40, {
     isStatic: true,
     label: "elevator_carrier",
-    plugin: { color },
+    plugin: { color, material: "wood", moving: true },
   });
 
   // 左壁（高めにしてこぼれ防止）
   const carrierLeftWall = Matter.Bodies.rectangle(x - 70, currentY - 8, 14, 60, {
     isStatic: true,
     label: "elevator_carrier",
-    plugin: { color },
+    plugin: { color, material: "wood", moving: true },
   });
 
   // 右壁（シュートから勢いよく落ちてくるボールを受け止められる高さを確保しつつ、
@@ -62,7 +63,7 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   const carrierRightWall = Matter.Bodies.rectangle(x + 75, currentY - 6, 14, 70, {
     isStatic: true,
     label: "elevator_carrier",
-    plugin: { color },
+    plugin: { color, material: "wood", moving: true },
   });
 
   // 待機用の固定床。carrier が上昇中で不在の間、シュートから次々に到着する
@@ -77,10 +78,10 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   const waitingFloor = Matter.Bodies.rectangle(x, bottomY + 72, 150, 16, {
     isStatic: true,
     label: "elevator_carrier",
-    plugin: { color },
+    plugin: { color, material: "wood", moving: false },
   });
 
-  // ガイドレール
+  // ガイドレール（金属）
   const rail = Matter.Bodies.rectangle(
     x - 85,
     (bottomY + topY) / 2,
@@ -89,7 +90,7 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     {
       isStatic: true,
       label: "elevator_rail",
-      plugin: { color: "#34495e" },
+      plugin: { color: STEEL_COLOR, material: "metal", moving: false },
     }
   );
 

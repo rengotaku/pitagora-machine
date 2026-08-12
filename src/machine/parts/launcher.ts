@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { STEEL_COLOR } from "../../config";
 
 export interface LauncherOptions {
   x?: number;
@@ -54,7 +55,7 @@ export function createLauncher(options: LauncherOptions = {}): LauncherComponent
   const y = options.y ?? 470;
   const launchVx = options.launchVx ?? 14.0;
   const launchVy = options.launchVy ?? -16.5;
-  const color = options.color ?? "#9b59b6";
+  const color = options.color ?? STEEL_COLOR;
   const landingBoostTriggerSpeed = options.landingBoostTriggerSpeed ?? 3.0;
   const landingBoostSpeed = options.landingBoostSpeed ?? 3.5;
   // 坂の下り方向。長さ方向 (cosθ, sinθ) の逆ベクトル。
@@ -63,12 +64,12 @@ export function createLauncher(options: LauncherOptions = {}): LauncherComponent
       ? { x: -Math.cos(options.landingAngle), y: -Math.sin(options.landingAngle) }
       : null;
 
-  // 発射台の底面（傾斜をつけてボールを中央へ導く）
+  // 発射台の底面（傾斜をつけてボールを中央へ導く。金属製）
   const base = Matter.Bodies.rectangle(x, y + 20, 100, 16, {
     isStatic: true,
     angle: 0.1,
     label: "launcher_base",
-    plugin: { color },
+    plugin: { color, material: "metal", moving: false },
   });
 
   // 右側のストッパー壁（sensor 範囲から完全に離し、打ち出し直後のボールの
@@ -78,7 +79,7 @@ export function createLauncher(options: LauncherOptions = {}): LauncherComponent
   const backWall = Matter.Bodies.rectangle(x + 75, y + 18, 14, 25, {
     isStatic: true,
     label: "launcher_wall",
-    plugin: { color },
+    plugin: { color, material: "metal", moving: false },
   });
 
   // センサー領域。base 上面 (y-5 付近の base 中心 y+20, 厚み16の上面 ≈ y+12) と

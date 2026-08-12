@@ -1,5 +1,5 @@
 import Matter from "matter-js";
-import { WORLD_HEIGHT, WORLD_WIDTH } from "../config";
+import { BIRCH_SHADOW_COLOR, WORLD_HEIGHT, WORLD_WIDTH } from "../config";
 
 export interface PitagoraWorld {
   engine: Matter.Engine;
@@ -19,7 +19,7 @@ export function createPitagoraWorld(): PitagoraWorld {
 
   const wallThickness = 60;
 
-  // 最下部の床
+  // 最下部の床（装置全体を支える台座。木部として扱う）
   const ground = Matter.Bodies.rectangle(
     WORLD_WIDTH / 2,
     WORLD_HEIGHT - wallThickness / 2,
@@ -28,7 +28,7 @@ export function createPitagoraWorld(): PitagoraWorld {
     {
       isStatic: true,
       label: "ground",
-      plugin: { color: "#5c4d42" },
+      plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
     }
   );
 
@@ -41,7 +41,7 @@ export function createPitagoraWorld(): PitagoraWorld {
     {
       isStatic: true,
       label: "wall",
-      plugin: { color: "#5c4d42" },
+      plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
     }
   );
 
@@ -54,7 +54,7 @@ export function createPitagoraWorld(): PitagoraWorld {
     {
       isStatic: true,
       label: "wall",
-      plugin: { color: "#5c4d42" },
+      plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
     }
   );
 

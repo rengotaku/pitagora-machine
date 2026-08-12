@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { BIRCH_COLOR, BIRCH_SHADOW_COLOR } from "../../config";
 import { shouldRecoverDominoes } from "../../lib/domino-recovery";
 
 export interface DominoRowOptions {
@@ -55,7 +56,7 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
   const platformThickness = options.platformThickness ?? 8;
   const recoveryWaitMs = options.recoveryWaitMs ?? 2200;
   const fallenAngleThreshold = options.fallenAngleThreshold ?? 0.6;
-  const color = options.color ?? "#f39c12";
+  const color = options.color ?? BIRCH_COLOR;
   const label = options.label ?? "domino";
 
   const rowLength = spacing * (count - 1);
@@ -76,7 +77,7 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
       angle,
       friction: 0.85,
       label: `${label}_platform`,
-      plugin: { color: "#a5673f" },
+      plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
     }
   );
 
@@ -104,7 +105,7 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
       restitution: 0.02,
       density: 0.0008,
       label,
-      plugin: { color },
+      plugin: { color, material: "wood", moving: true },
     });
     dominoes.push(domino);
     restStates.push({ x: dx, y: dy, angle });

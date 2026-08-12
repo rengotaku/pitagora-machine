@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import { BIRCH_COLOR } from "../../config";
 
 export interface RampOptions {
   x: number;
@@ -26,16 +27,16 @@ export function createRamp(options: RampOptions): RampComponent {
   const thickness = options.thickness ?? 16;
   const label = options.label ?? "ramp";
   const friction = options.friction ?? 0.002;
-  const color = options.color ?? "#4a3b32";
+  const color = options.color ?? BIRCH_COLOR;
 
-  // 坂の床
+  // 坂の床（木部）
   const ramp = Matter.Bodies.rectangle(options.x, options.y, options.length, thickness, {
     isStatic: true,
     angle: options.angle,
     friction,
     restitution: 0.1,
     label,
-    plugin: { color },
+    plugin: { color, material: "wood", moving: false },
   });
 
   const bodies: Matter.Body[] = [ramp];

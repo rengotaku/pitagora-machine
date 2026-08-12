@@ -28,6 +28,8 @@ function createMockCtx2D(): CanvasRenderingContext2D {
     arc: noop,
     fill: noop,
     stroke: noop,
+    rotate: noop,
+    quadraticCurveTo: noop,
   } as unknown as CanvasRenderingContext2D;
 }
 
