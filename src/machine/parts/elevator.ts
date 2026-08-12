@@ -16,6 +16,12 @@ export interface ElevatorComponent {
     deltaMs: number,
     onDispense?: (ballId: number) => void
   ): void;
+  /**
+   * キャリア上または待機床で運搬待ちのボールかどうか。
+   * この状態のボールは「動いていない」が詰まっているわけではないので、
+   * 押し出し(nudge)や停滞検知の対象から外す必要がある。
+   */
+  isHolding(ballId: number): boolean;
 }
 
 /**
@@ -59,6 +65,21 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color },
   });
 
+  // 待機用の固定床。carrier が上昇中で不在の間、シュートから次々に到着する
+  // ボールを受け止めて待たせる。これが無いと、複数ボールが短い間隔で到着する
+  // 状況 (issue #4 で同時稼働数を増やした結果) で、carrier が上昇中に後続の
+  // ボールが到着した際、受け止める床が無く地面まで落下し続けてしまい、
+  // stall 検知に頼らないと回収できない詰まりになっていた (実測で確認)。
+  // carrierBase 下面 (waiting_bottom 時 bottomY+44) との間に 20px 以上の隙間を
+  // 空ける (隙間が数 px 程度しか無いと、ボールがその隙間で挟まって完全に
+  // 動けなくなる状態を実測で確認した)。地面 (ground 上面) にも接触しない
+  // 高さに収める。
+  const waitingFloor = Matter.Bodies.rectangle(x, bottomY + 72, 150, 16, {
+    isStatic: true,
+    label: "elevator_carrier",
+    plugin: { color },
+  });
+
   // ガイドレール
   const rail = Matter.Bodies.rectangle(
     x - 85,
@@ -80,7 +101,14 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color: "transparent" },
   });
 
-  const bodies = [rail, carrierBase, carrierLeftWall, carrierRightWall, sensor];
+  const bodies = [
+    rail,
+    carrierBase,
+    carrierLeftWall,
+    carrierRightWall,
+    waitingFloor,
+    sensor,
+  ];
 
   const updatePositions = (newY: number): void => {
     currentY = newY;
@@ -90,10 +118,15 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
   };
 
   const dispensedBalls = new Set<number>();
+  /** キャリア上・待機床で運搬待ちのボール。update のたびに作り直す */
+  const heldBallIds = new Set<number>();
 
   return {
     bodies,
     sensor,
+    isHolding(ballId: number): boolean {
+      return heldBallIds.has(ballId);
+    },
     update(
       engine: Matter.Engine,
       deltaMs: number,
@@ -103,17 +136,64 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
       const allBodies = Matter.Composite.allBodies(engine.world);
       const balls = allBodies.filter((b) => b.label === "ball");
 
+      // waiting_bottom (carrier が底で待機中) の間だけ、判定範囲を待機用固定床
+      // (bottomY+60 付近) まで広げる。moving_up 以降にこの範囲を広げたままだと、
+      // carrier が不在の間に待機床へ新しく到着したボールまで「carrier 内」と
+      // 誤認識し、carrierBase との物理的な接触なしに持ち上げ速度を与えてしまう。
+      const carrierRangeBottom =
+        state === "waiting_bottom" ? currentY + 90 : currentY + 44;
       const ballsInCarrier = balls.filter((b) => {
         return (
           Math.abs(b.position.x - x) < 80 &&
           b.position.y >= currentY - 45 &&
-          b.position.y <= currentY + 44
+          b.position.y <= carrierRangeBottom
         );
       });
+
+      // 運搬待ちのボールを記録しておく。呼び出し側はこれを見て、
+      // 待機中のボールを押し出し(nudge)や停滞検知の対象から外す。
+      //
+      // carrier 上のボール (ballsInCarrier) だけでは足りない。carrier が上昇・
+      // 下降している間は判定範囲が currentY 付近に限定されるため、その間に
+      // 固定待機床へ到着した後続ボールが漏れる。漏れると「正常に待っている
+      // だけ」のボールが 1.2 秒後に押し出され、待機床から弾き出されて落下・
+      // 回収を誘発する。carrier の位置に関係なく、待機床の上も常に見る。
+      heldBallIds.clear();
+      const rememberHeld = (b: Matter.Body): void => {
+        const id = (b.plugin as { ballData?: { id: number } })?.ballData?.id;
+        if (id !== undefined) {
+          heldBallIds.add(id);
+        }
+      };
+      for (const b of ballsInCarrier) {
+        rememberHeld(b);
+      }
+      const waitingFloorTop = waitingFloor.position.y - 8;
+      for (const b of balls) {
+        const onWaitingFloor =
+          Math.abs(b.position.x - x) < 80 &&
+          b.position.y >= waitingFloorTop - 60 &&
+          b.position.y <= waitingFloorTop + 12;
+        if (onWaitingFloor) {
+          rememberHeld(b);
+        }
+      }
 
       switch (state) {
         case "waiting_bottom": {
           updatePositions(bottomY);
+
+          // 待機床の上に降り積もったボールを carrierBase 上へ引き上げる。
+          // carrierBase との間に意図的に空けた隙間 (直接の物理的接触が無い)
+          // を自力で転がり越えることは期待できないため、ここで直接引き上げる
+          // (launcher / branchGate と同じ「検知して直接書き換える」手法)。
+          for (const ball of ballsInCarrier) {
+            if (ball.position.y > currentY + 44) {
+              Matter.Body.setPosition(ball, { x: ball.position.x, y: currentY + 10 });
+              Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+            }
+          }
+
           if (ballsInCarrier.length > 0) {
             state = "moving_up";
           }

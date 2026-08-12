@@ -144,16 +144,24 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
         (b) => b.label === "ball"
       );
 
-      let touchedNow = false;
+      // 「新規にセンサーへ入ってきたボールがいるか」だけで msSinceLastContact を
+      // リセットする (touchedNow = センサー内に誰かいるか、ではない)。
+      // 複数ボールが連続してドミノ列に詰まった場合、touchedNow 方式だと
+      // 団子の中のボールがセンサー内に居座り続ける限り msSinceLastContact が
+      // 常に 0 に戻り、復帰待機時間 (recoveryWaitMs) に絶対到達せず、詰まった
+      // ドミノが永久に起き上がらない悪循環になっていた (実測で確認)。
+      // 新規流入のみをリセット条件にすることで、団子状態でも新しいボールの
+      // 流入が止まれば一定時間後に強制的に起こし直せるようにする。
+      let hasNewContact = false;
       for (const ball of balls) {
         const ballId = (ball.plugin as { ballData?: { id: number } })?.ballData?.id;
         if (!ballId) continue;
 
         const inSensor = Matter.Bounds.overlaps(sensor.bounds, ball.bounds);
         if (inSensor) {
-          touchedNow = true;
           if (!passedBalls.has(ballId)) {
             passedBalls.add(ballId);
+            hasNewContact = true;
             onPass?.(ballId);
           }
         } else if (passedBalls.has(ballId)) {
@@ -161,7 +169,7 @@ export function createDominoRow(options: DominoRowOptions): DominoRowComponent {
         }
       }
 
-      msSinceLastContact = touchedNow ? 0 : msSinceLastContact + deltaMs;
+      msSinceLastContact = hasNewContact ? 0 : msSinceLastContact + deltaMs;
 
       let fallenCount = 0;
       for (let i = 0; i < dominoes.length; i += 1) {

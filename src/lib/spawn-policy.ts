@@ -1,6 +1,7 @@
 /**
  * ボール投入 (Spawn) ポリシーの実装。
  */
+import { canSpawnBall } from "./ball-budget";
 import type { Rng } from "./random";
 import { randomRange } from "./random";
 
@@ -15,7 +16,8 @@ export interface SpawnCheckParams {
  * 新しいボールを投入すべきかどうかを判定する。
  *
  * - 画面内にボールが 1 個もない (activeBalls <= 0) 場合は経過時間に関わらず最優先で true を返す。
- * - 画面内のボール数が上限 (activeBalls >= maxActiveBalls) に達している場合は false を返す。
+ * - 総数の上限判定は src/lib/ball-budget.ts の canSpawnBall に委譲する
+ *   (「上限を超えないか」の収支管理という別の関心事のため)。
  * - それ以外は直前投入からの経過時間 (msSinceLastSpawn) が nextDelayMs 以上経過していれば true を返す。
  */
 export function shouldSpawnBall(params: SpawnCheckParams): boolean {
@@ -23,7 +25,9 @@ export function shouldSpawnBall(params: SpawnCheckParams): boolean {
     return true;
   }
 
-  if (params.activeBalls >= params.maxActiveBalls) {
+  if (
+    !canSpawnBall({ currentCount: params.activeBalls, maxCount: params.maxActiveBalls })
+  ) {
     return false;
   }
 
