@@ -4,6 +4,12 @@ export interface GimmickStats {
   launcher: number;
   ramp2: number;
   elevator: number;
+  branchLeft: number;
+  branchRight: number;
+  pendulum: number;
+  domino: number;
+  wheel: number;
+  bounceFloor: number;
 }
 
 export interface PitagoraStats {

@@ -8,10 +8,15 @@ import { createTimestepCalculator } from "../lib/timestep";
 import { fitWorldToCanvas, type ViewportTransform } from "../lib/viewport";
 import { renderWorld } from "../render/renderer";
 import { createBall, getBallData } from "./ball";
+import { createBounceFloor } from "./parts/bounce-floor";
+import { createBranchGate } from "./parts/branch-gate";
+import { createDominoRow } from "./parts/domino";
 import { createElevator } from "./parts/elevator";
 import { createLauncher } from "./parts/launcher";
+import { createPendulum } from "./parts/pendulum";
 import { createRamp } from "./parts/ramp";
 import { createSeesaw } from "./parts/seesaw";
+import { createWheel } from "./parts/wheel";
 import { createPitagoraWorld } from "./world";
 
 export interface SimulationConfig {
@@ -36,13 +41,19 @@ export function startSimulation(
 ): SimulationInstance {
   // 発射装置から ramp2 への着地後、坂の勾配 (重力加速度) だけでは速度の回復が
   // 緩やかなため、同時稼働数・投入間隔を抑えて launcher〜ramp2 付近での
-  // 団子化 (3個以上の滞留) を避ける
-  const maxActiveBalls = config.maxActiveBalls ?? 4;
+  // 団子化 (3個以上の滞留) を避ける。issue #3 でドミノ列・振り子など坂1上の
+  // 障害物が増えたことにより、4 個同時稼働だと坂1序盤 (分岐ゲート〜ドミノ)
+  // に複数ボールが競合して団子化することを実測で確認したため 3 に抑える。
+  const maxActiveBalls = config.maxActiveBalls ?? 3;
   const seed = config.seed ?? 12345;
   const fixedDeltaMs = config.fixedDeltaMs ?? 16.666;
   const maxStepsPerFrame = config.maxStepsPerFrame ?? 5;
-  const minSpawnDelayMs = config.minSpawnDelayMs ?? 4200;
-  const maxSpawnDelayMs = config.maxSpawnDelayMs ?? 6500;
+  // issue #3 で坂1上に分岐ゲート・振り子・ドミノ列が増え、1 周にかかる時間が
+  // 伸びた。投入間隔を詰めて周回中のボール数を確保することで、60 秒の計測
+  // 窓の中でも坂2のホイール・バウンド床・エレベーターまで到達するボールが
+  // 安定して出るようにする (実測でギリギリ届かない回があったため調整)。
+  const minSpawnDelayMs = config.minSpawnDelayMs ?? 2800;
+  const maxSpawnDelayMs = config.maxSpawnDelayMs ?? 4200;
   const stallDurationMs = config.stallDurationMs ?? 4500;
 
   const rng = createRng(seed);
@@ -183,6 +194,84 @@ export function startSimulation(
     label: "guide_top",
   });
 
+  // --- 追加ギミック (issue #3) ---
+  // 既存のコアループ (ramp1 / seesaw / launcher / ramp2 / elevator とそれらを
+  // つなぐシュート) は issue #2 で検証済みのため位置・角度を一切変更しない。
+  // 新しい仕掛けは ramp1・ramp2 という長い直線区間の「上」に追加のボディとして
+  // 載せる形で挿入し、既存のシュート同士の接続点には触れない。
+
+  // 6. 分岐ゲート (坂1の序盤、ボールがガイドから坂1へ乗り移った直後)
+  // 通過したボールの速度を左右いずれかへ振り分ける (route-choice.ts の
+  // 偏り補正付き重み選択を使用)。既存経路そのものを分けるのではなく、
+  // ボール自身の速度を launcher と同じ手法で書き換えることで安全に振り分ける。
+  const branchGate = createBranchGate({
+    x: 380,
+    y: 165,
+    width: 120,
+    height: 100,
+    leftWeight: 1,
+    rightWeight: 1,
+    maxStreak: 4,
+  });
+
+  // 7. 振り子 (坂1の中盤上空、一定周期で振れて通過するボールを叩く)
+  // 腕の長さは「最下点でも坂1を転がる最大径のボールの上端より確実に高い位置に
+  // とどまる」よう安全マージンを持たせている。振り子の実測では、坂の表面すれすれ
+  // まで届く設定にすると通過するボールを継続的に弾き飛ばし、団子状の詰まりを
+  // 誘発することが確認できたため (実測で確認済み)。通過検知は sensor 側で
+  // 独立して広く取っているため、腕を浅くしても gimmicks.pendulum の計測には
+  // 影響しない。
+  const pendulum = createPendulum({
+    pivotX: 520,
+    pivotY: 50,
+    armLength: 78,
+    bobRadius: 15,
+    periodMs: 2100,
+    amplitudeRad: 0.6,
+    sensorY: 195,
+    sensorWidth: 160,
+    sensorHeight: 100,
+  });
+
+  // 8. ドミノ列 (坂1の終盤、専用の高摩擦プラットフォームの上に立てる)
+  // 坂1本体は低摩擦 (約 0.001 相当) にボールを速く転がすチューニングがされて
+  // いるため、ドミノを直接その上に置くと自重で滑り落ちてしまう。
+  // y は坂1の実際の転がり面 (中心線から見て開放側、厚み分だけ上) に
+  // プラットフォーム自身の厚みの半分を足した高さに合わせている。実測で
+  // 坂1面より高く浮かせて配置すると「壁」になりボールが登れず完全停止する
+  // ことを確認したため、必ず実測 (ball の bounds) で検証してから調整すること。
+  const dominoRow = createDominoRow({
+    x: 700,
+    y: 265,
+    angle: 0.28,
+    count: 4,
+    spacing: 34,
+    dominoHeight: 14,
+    recoveryWaitMs: 800,
+  });
+
+  // 9. 回転ホイール (坂2の序盤上空、定速回転しボールを弾く)
+  const wheel = createWheel({
+    x: 650,
+    y: 558,
+    radius: 14,
+    bladeLength: 100,
+    angularSpeed: 4.0,
+    sensorY: 615,
+    sensorWidth: 180,
+    sensorHeight: 100,
+  });
+
+  // 10. バウンドする床 (坂2の中盤、通過したボールを開放側へ跳ね上げる)
+  // y は坂2の実際の転がり面に床自身の厚みの半分を足した高さ (domino_platform
+  // と同じ計算方法)。
+  const bounceFloor = createBounceFloor({
+    x: 850,
+    y: 564,
+    angle: -0.325,
+    bounceSpeed: 6.5,
+  });
+
   Matter.Composite.add(engine.world, [
     ...ramp1.bodies,
     ...ramp1ToSeesawChute.bodies,
@@ -195,6 +284,11 @@ export function startSimulation(
     elevatorCatchFence,
     ...elevator.bodies,
     ...elevatorToRamp1Guide.bodies,
+    ...branchGate.bodies,
+    ...pendulum.bodies,
+    ...dominoRow.bodies,
+    ...wheel.bodies,
+    ...bounceFloor.bodies,
   ]);
   Matter.Composite.add(engine.world, seesaw.constraints);
 
@@ -236,6 +330,12 @@ export function startSimulation(
     launcher: 0,
     ramp2: 0,
     elevator: 0,
+    branchLeft: 0,
+    branchRight: 0,
+    pendulum: 0,
+    domino: 0,
+    wheel: 0,
+    bounceFloor: 0,
   };
 
   const countedRamp1 = new Set<number>();
@@ -330,6 +430,34 @@ export function startSimulation(
 
         elevator.update(engine, dt, () => {
           gimmicks.elevator += 1;
+        });
+
+        // 追加ギミック (issue #3): いずれもボディの位置に依存する検知・駆動
+        // (回転・振動のキネマティック駆動、ボール速度の書き換え) であり、
+        // launcher/elevator と同じ理由でフレーム単位ではなくステップ単位で
+        // 評価する。
+        branchGate.update(engine, rng, (side) => {
+          if (side === "left") {
+            gimmicks.branchLeft += 1;
+          } else {
+            gimmicks.branchRight += 1;
+          }
+        });
+
+        pendulum.update(engine, dt, () => {
+          gimmicks.pendulum += 1;
+        });
+
+        dominoRow.update(engine, dt, () => {
+          gimmicks.domino += 1;
+        });
+
+        wheel.update(engine, dt, () => {
+          gimmicks.wheel += 1;
+        });
+
+        bounceFloor.update(engine, () => {
+          gimmicks.bounceFloor += 1;
         });
       },
     });
