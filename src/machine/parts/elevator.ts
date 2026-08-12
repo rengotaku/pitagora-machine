@@ -59,6 +59,21 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color },
   });
 
+  // 待機用の固定床。carrier が上昇中で不在の間、シュートから次々に到着する
+  // ボールを受け止めて待たせる。これが無いと、複数ボールが短い間隔で到着する
+  // 状況 (issue #4 で同時稼働数を増やした結果) で、carrier が上昇中に後続の
+  // ボールが到着した際、受け止める床が無く地面まで落下し続けてしまい、
+  // stall 検知に頼らないと回収できない詰まりになっていた (実測で確認)。
+  // carrierBase 下面 (waiting_bottom 時 bottomY+44) との間に 20px 以上の隙間を
+  // 空ける (隙間が数 px 程度しか無いと、ボールがその隙間で挟まって完全に
+  // 動けなくなる状態を実測で確認した)。地面 (ground 上面) にも接触しない
+  // 高さに収める。
+  const waitingFloor = Matter.Bodies.rectangle(x, bottomY + 72, 150, 16, {
+    isStatic: true,
+    label: "elevator_carrier",
+    plugin: { color },
+  });
+
   // ガイドレール
   const rail = Matter.Bodies.rectangle(
     x - 85,
@@ -80,7 +95,14 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color: "transparent" },
   });
 
-  const bodies = [rail, carrierBase, carrierLeftWall, carrierRightWall, sensor];
+  const bodies = [
+    rail,
+    carrierBase,
+    carrierLeftWall,
+    carrierRightWall,
+    waitingFloor,
+    sensor,
+  ];
 
   const updatePositions = (newY: number): void => {
     currentY = newY;
@@ -103,17 +125,35 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
       const allBodies = Matter.Composite.allBodies(engine.world);
       const balls = allBodies.filter((b) => b.label === "ball");
 
+      // waiting_bottom (carrier が底で待機中) の間だけ、判定範囲を待機用固定床
+      // (bottomY+60 付近) まで広げる。moving_up 以降にこの範囲を広げたままだと、
+      // carrier が不在の間に待機床へ新しく到着したボールまで「carrier 内」と
+      // 誤認識し、carrierBase との物理的な接触なしに持ち上げ速度を与えてしまう。
+      const carrierRangeBottom =
+        state === "waiting_bottom" ? currentY + 90 : currentY + 44;
       const ballsInCarrier = balls.filter((b) => {
         return (
           Math.abs(b.position.x - x) < 80 &&
           b.position.y >= currentY - 45 &&
-          b.position.y <= currentY + 44
+          b.position.y <= carrierRangeBottom
         );
       });
 
       switch (state) {
         case "waiting_bottom": {
           updatePositions(bottomY);
+
+          // 待機床の上に降り積もったボールを carrierBase 上へ引き上げる。
+          // carrierBase との間に意図的に空けた隙間 (直接の物理的接触が無い)
+          // を自力で転がり越えることは期待できないため、ここで直接引き上げる
+          // (launcher / branchGate と同じ「検知して直接書き換える」手法)。
+          for (const ball of ballsInCarrier) {
+            if (ball.position.y > currentY + 44) {
+              Matter.Body.setPosition(ball, { x: ball.position.x, y: currentY + 10 });
+              Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+            }
+          }
+
           if (ballsInCarrier.length > 0) {
             state = "moving_up";
           }

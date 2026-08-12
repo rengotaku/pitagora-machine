@@ -1,6 +1,7 @@
 import Matter from "matter-js";
 import { WORLD_HEIGHT, WORLD_WIDTH } from "../config";
 import { runFixedSteps } from "../lib/frame-scheduler";
+import { createNudgeTracker, type NudgeSample } from "../lib/nudge";
 import { createRng } from "../lib/random";
 import { nextSpawnDelay, shouldSpawnBall } from "../lib/spawn-policy";
 import { createStallTracker, type StallSample } from "../lib/stall";
@@ -34,17 +35,23 @@ export interface SimulationInstance {
   step?(deltaMs: number): void;
 }
 
+/** nudge 1 回あたりに加える速度の大きさ。ランダムな方向へ軽く押す程度に留める。 */
+const NUDGE_SPEED = 2.2;
+
 export function startSimulation(
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
   config: SimulationConfig = {}
 ): SimulationInstance {
-  // 発射装置から ramp2 への着地後、坂の勾配 (重力加速度) だけでは速度の回復が
-  // 緩やかなため、同時稼働数・投入間隔を抑えて launcher〜ramp2 付近での
-  // 団子化 (3個以上の滞留) を避ける。issue #3 でドミノ列・振り子など坂1上の
-  // 障害物が増えたことにより、4 個同時稼働だと坂1序盤 (分岐ゲート〜ドミノ)
-  // に複数ボールが競合して団子化することを実測で確認したため 3 に抑える。
-  const maxActiveBalls = config.maxActiveBalls ?? 3;
+  // issue #4: 「同時に流れるボール」を要望どおり増やす。issue #3 時点では
+  // 発射装置〜ramp2 着地点の減速と、ドミノ列で新規ボールが検知され続けて
+  // 復帰待ちがリセットされ続ける問題により、4 個同時稼働だと坂1序盤
+  // (分岐ゲート〜ドミノ) や着地点で団子化していたため 3 に抑えていた。
+  // 今回、着地点の減速には launcher の着地加速 (landingAngle) を、ドミノ列の
+  // 復帰待ちには「新規ボール検知時のみリセット」への変更 (domino.ts) を
+  // それぞれ入れて詰まる構造そのものを直したため、5 に増やしても実測で
+  // 団子化しないことを確認できた (5 分間の稼働で recoveredBalls が悪化しない)。
+  const maxActiveBalls = config.maxActiveBalls ?? 5;
   const seed = config.seed ?? 12345;
   const fixedDeltaMs = config.fixedDeltaMs ?? 16.666;
   const maxStepsPerFrame = config.maxStepsPerFrame ?? 5;
@@ -67,6 +74,18 @@ export function startSimulation(
   const stallTracker = createStallTracker({
     minTravelDistance: 20,
     stallDurationMs,
+  });
+
+  // 押し出し (nudge)。経路 (勾配・摩擦・着地条件・仕掛けの間隔) の見直しを
+  // 優先して詰まりの大半を解消したうえで、それでも残る局所的な停滞に対する
+  // 保険として使う (nudge を最初の手段にしない)。stallDurationMs (4500ms) より
+  // 短い nudgeThresholdMs (1200ms) で先に軽く押し、なお動かなければ
+  // maxNudgeCount (3 回) で諦めて stall 検知による回収に委ねる。
+  const nudgeTracker = createNudgeTracker({
+    minTravelDistance: 20,
+    nudgeThresholdMs: 1200,
+    cooldownMs: 500,
+    maxNudgeCount: 3,
   });
 
   // --- コースパーツの配置 ---
@@ -128,11 +147,22 @@ export function startSimulation(
   // 無限ループの原因になっていた (孤立シミュレーションで実測)。
   // 着地点は ramp2 右端 (x=1316.5) から十分な余裕 (100px 前後) を持たせる必要がある。
   // 余裕が無いと、着地後の残速度で坂の外へ滑り出してしまう。
+  //
+  // landingAngle 以下は着地加速の設定。Node で launcher の弾道を再現したところ、
+  // 着地時の衝突で接線方向速度の大半を失い、着地から 700〜900ms 後に速度が
+  // ほぼ 0 になることを確認した (摩擦・反発係数の調整では改善せず、円形ボディが
+  // 転がることによる並進加速度の目減りが支配的)。ramp2 を急勾配に作り直すと
+  // wheel (x=650) / bounce_floor (x=850) など下流ギミックの接続位置が総崩れに
+  // なるため、発射した本人のボールだけを追跡できる launcher 側で着地後の
+  // 速度を補正する。
   const launcher = createLauncher({
     x: 1140,
     y: 460,
     launchVx: 5.5,
     launchVy: -4.2,
+    landingAngle: -0.325,
+    landingBoostTriggerSpeed: 3.0,
+    landingBoostSpeed: 3.5,
   });
 
   // 4. 坂 2 (右1320, 410 -> 左460, 690)
@@ -336,6 +366,28 @@ export function startSimulation(
     domino: 0,
     wheel: 0,
     bounceFloor: 0,
+    landingBoost: 0,
+  };
+
+  /**
+   * ボールがセンサー領域へ入った瞬間に 1 回だけ数え、出たら記録を消す。
+   * 出たときに消さないと同じボールの 2 周目以降を数えられず、統計が
+   * 「通過回数」ではなく「通ったことのあるボールの数」になってしまう。
+   */
+  const countPassage = (
+    counted: Set<number>,
+    sensor: Matter.Body,
+    ball: Matter.Body,
+    id: number,
+    onEnter: () => void
+  ): void => {
+    const inside = Matter.Bounds.overlaps(sensor.bounds, ball.bounds);
+    if (inside && !counted.has(id)) {
+      counted.add(id);
+      onEnter();
+    } else if (!inside && counted.has(id)) {
+      counted.delete(id);
+    }
   };
 
   const countedRamp1 = new Set<number>();
@@ -424,9 +476,16 @@ export function startSimulation(
     runFixedSteps(steps, fixedDeltaMs, {
       onPhysicsStep: (dt) => Matter.Engine.update(engine, dt),
       onDeviceStep: (dt) => {
-        launcher.update(engine, () => {
-          gimmicks.launcher += 1;
-        });
+        launcher.update(
+          engine,
+          dt,
+          () => {
+            gimmicks.launcher += 1;
+          },
+          () => {
+            gimmicks.landingBoost += 1;
+          }
+        );
 
         elevator.update(engine, dt, () => {
           gimmicks.elevator += 1;
@@ -473,29 +532,18 @@ export function startSimulation(
       if (!data) continue;
       const id = data.id;
 
-      if (
-        !countedRamp1.has(id) &&
-        Matter.Bounds.overlaps(ramp1.sensor.bounds, ball.bounds)
-      ) {
-        countedRamp1.add(id);
+      // センサーから出たら記録を消す。消さないと「ボール 1 個につき 1 回」しか
+      // 数えられず、周回するたびに増える wheel / domino 側のカウントと意味が
+      // 食い違う（実測で ramp1 の値が周回数ではなくボール ID 数になっていた）。
+      countPassage(countedRamp1, ramp1.sensor, ball, id, () => {
         gimmicks.ramp1 += 1;
-      }
-
-      if (
-        !countedSeesaw.has(id) &&
-        Matter.Bounds.overlaps(seesaw.sensor.bounds, ball.bounds)
-      ) {
-        countedSeesaw.add(id);
+      });
+      countPassage(countedSeesaw, seesaw.sensor, ball, id, () => {
         gimmicks.seesaw += 1;
-      }
-
-      if (
-        !countedRamp2.has(id) &&
-        Matter.Bounds.overlaps(ramp2.sensor.bounds, ball.bounds)
-      ) {
-        countedRamp2.add(id);
+      });
+      countPassage(countedRamp2, ramp2.sensor, ball, id, () => {
         gimmicks.ramp2 += 1;
-      }
+      });
     }
 
     // 1. フェイルセーフ (画面外回収)
@@ -508,6 +556,7 @@ export function startSimulation(
         const data = getBallData(ball);
         if (data) {
           stallTracker.forget(data.id);
+          nudgeTracker.forget(data.id);
           countedRamp1.delete(data.id);
           countedSeesaw.delete(data.id);
           countedRamp2.delete(data.id);
@@ -518,7 +567,7 @@ export function startSimulation(
       }
     }
 
-    // 2. スタック検知
+    // 2. 押し出し (nudge) とスタック検知。同じ位置サンプルを両方の判定で共有する。
     const validBalls = Matter.Composite.allBodies(engine.world).filter(
       (b) => b.label === "ball"
     );
@@ -533,6 +582,27 @@ export function startSimulation(
       }
     }
 
+    // 2a. 押し出し (nudge)。stall 検知より短いしきい値 (1200ms) で先に軽く
+    // 押す。詰まる構造そのものは経路修正 (launcher の着地加速・domino の復帰
+    // 判定・elevator の待機床) で直しているため、ここに来るのは残った局所的な
+    // 停滞のみを想定している。
+    const nudgeSamples: NudgeSample[] = samples;
+    const nudgeIds = nudgeTracker.update(nudgeSamples, effectiveMs);
+
+    for (const nudgeId of nudgeIds) {
+      const targetBall = ballMap.get(nudgeId);
+      if (targetBall) {
+        const angle = rng() * Math.PI * 2;
+        const v = targetBall.velocity;
+        Matter.Body.setVelocity(targetBall, {
+          x: v.x + Math.cos(angle) * NUDGE_SPEED,
+          y: v.y + Math.sin(angle) * NUDGE_SPEED,
+        });
+      }
+    }
+
+    // 2b. スタック検知。nudge を試みても maxNudgeCount 回で解消しなければ、
+    // 最終的にここで回収・再投入される。
     const stalledIds = stallTracker.update(samples, effectiveMs);
 
     for (const stalledId of stalledIds) {
@@ -543,6 +613,7 @@ export function startSimulation(
         );
         Matter.Composite.remove(engine.world, targetBall);
         stallTracker.forget(stalledId);
+        nudgeTracker.forget(stalledId);
         countedRamp1.delete(stalledId);
         countedSeesaw.delete(stalledId);
         countedRamp2.delete(stalledId);

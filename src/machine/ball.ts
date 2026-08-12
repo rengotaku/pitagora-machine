@@ -1,6 +1,6 @@
 import Matter from "matter-js";
+import { generateBallVariation } from "../lib/ball-variation";
 import type { Rng } from "../lib/random";
-import { pick } from "../lib/random";
 
 export interface BallUserData {
   id: number;
@@ -17,7 +17,6 @@ export function resetBallIdCounter(): void {
   nextBallId = 1;
 }
 
-const BALL_SIZES = [14, 18, 22];
 const BALL_COLORS = [
   "#e74c3c", // 赤
   "#3498db", // 青
@@ -29,26 +28,25 @@ const BALL_COLORS = [
 
 /**
  * ボールを生成する。
- * src/lib/random.ts でサイズ（2〜3種類）と色にばらつきを持たせる。
- * stall 検知用に一意な id を付与する。
+ * 個体差 (半径・反発・密度・色) は src/lib/ball-variation.ts の純粋関数で
+ * シード付き乱数から決める。stall 検知用に一意な id を付与する。
  */
 export function createBall(rng: Rng, x: number, y: number): Matter.Body {
   const id = nextBallId;
   nextBallId += 1;
 
-  const radius = pick(rng, BALL_SIZES);
-  const color = pick(rng, BALL_COLORS);
+  const variation = generateBallVariation(rng, BALL_COLORS);
 
   const ballData: BallUserData = {
     id,
-    color,
-    radius,
+    color: variation.color,
+    radius: variation.radius,
   };
 
-  const ball = Matter.Bodies.circle(x, y, radius, {
-    restitution: 0.5,
+  const ball = Matter.Bodies.circle(x, y, variation.radius, {
+    restitution: variation.restitution,
     friction: 0.05,
-    density: 0.002,
+    density: variation.density,
     label: "ball",
     plugin: {
       ballData,
