@@ -100,7 +100,10 @@ export function createWheel(options: WheelOptions): WheelComponent {
       const nextAngle = hub.angle + angularSpeed * deltaSec;
       setBodyAngle(hub, nextAngle, true);
       setBodyAngle(bladeA, nextAngle, true);
-      setBodyAngle(bladeB, nextAngle + Math.PI / 2, true);
+      // bladeB は幅と高さを入れ替えて生成しているため、角度 0 の時点で bladeA と
+      // 直交している。ここで π/2 を足すと 2 枚が同じ向きに重なり、十字ではなく
+      // 1 本の羽根になってボールを弾く範囲が半分になる。
+      setBodyAngle(bladeB, nextAngle, true);
 
       const balls = Matter.Composite.allBodies(engine.world).filter(
         (b) => b.label === "ball"
