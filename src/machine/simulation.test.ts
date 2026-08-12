@@ -30,6 +30,8 @@ function createMockCtx2D(): CanvasRenderingContext2D {
     stroke: noop,
     rotate: noop,
     quadraticCurveTo: noop,
+    // issue #6: debugEnabled=true 時に renderer.ts の drawDebugSensor が呼ぶ。
+    setLineDash: noop,
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -75,5 +77,97 @@ describe("simulation", () => {
 
     sim.stop();
     rafSpy.mockRestore();
+  });
+
+  it("issue #6: setGravity で engine.gravity.y を稼働中のまま書き換えられる (再構築なし)", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, { seed: 400 });
+    expect(() => sim.setGravity(0)).not.toThrow();
+    expect(() => sim.step?.(16.666)).not.toThrow();
+    // 重力を 0 にしても装置がクラッシュしない (座標が NaN 化しない) ことを確認する。
+    expect(Number.isFinite(window.__pitagora?.activeBalls)).toBe(true);
+
+    expect(() => sim.setGravity(1)).not.toThrow();
+    expect(() => sim.step?.(16.666)).not.toThrow();
+
+    sim.stop();
+  });
+
+  it("issue #6: setMaxActiveBalls で上限を下げると超過分の既存ボールが回収される", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    // 投入間隔を 0 にして、短い step 回数でも複数ボールが同時稼働する状態を作る。
+    const sim = startSimulation(canvas, ctx, {
+      seed: 500,
+      maxActiveBalls: 5,
+      minSpawnDelayMs: 0,
+      maxSpawnDelayMs: 0,
+    });
+    for (let i = 0; i < 10; i += 1) {
+      sim.step?.(16.666);
+    }
+    expect(window.__pitagora?.activeBalls).toBeGreaterThan(1);
+
+    sim.setMaxActiveBalls(1);
+    sim.step?.(16.666);
+    expect(window.__pitagora?.activeBalls).toBeLessThanOrEqual(1);
+
+    sim.stop();
+  });
+
+  it("issue #6: setSpeedScale を変更してもエラーなく稼働し続ける", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, { seed: 600 });
+    sim.setSpeedScale(2);
+    expect(() => sim.step?.(16.666)).not.toThrow();
+    sim.setSpeedScale(0.25);
+    expect(() => sim.step?.(16.666)).not.toThrow();
+
+    sim.stop();
+  });
+
+  it("issue #6: setDebugEnabled(true) で当たり判定描画が有効になってもエラーなく稼働する", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, { seed: 700 });
+    sim.setDebugEnabled(true);
+    expect(() => sim.step?.(16.666)).not.toThrow();
+
+    sim.stop();
+  });
+
+  it("issue #6: reset() で統計がゼロに戻り、装置がページリロードなしに再稼働する", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, { seed: 800 });
+    sim.step?.(16.666);
+    sim.step?.(16.666);
+
+    sim.reset();
+
+    expect(window.__pitagora?.elapsedMs).toBe(0);
+    expect(window.__pitagora?.recoveredBalls).toBe(0);
+    expect(window.__pitagora?.outOfBoundsBalls).toBe(0);
+    expect(window.__pitagora?.activeBalls).toBe(1);
+    expect(window.__pitagora?.gimmicks.ramp1).toBe(0);
+
+    sim.stop();
   });
 });

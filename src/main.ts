@@ -1,5 +1,6 @@
 import "./style.css";
 import { startSimulation } from "./machine/simulation";
+import { mountSettingsPanel } from "./panel/settings-panel";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#stage");
 if (!canvas) {
@@ -11,4 +12,5 @@ if (!context) {
   throw new Error("2D コンテキストを取得できませんでした");
 }
 
-startSimulation(canvas, context);
+const simulation = startSimulation(canvas, context);
+mountSettingsPanel(simulation);

@@ -28,11 +28,34 @@ export interface SimulationConfig {
   minSpawnDelayMs?: number;
   maxSpawnDelayMs?: number;
   stallDurationMs?: number;
+  /** 初期重力 (engine.gravity.y に対応)。省略時は Matter.js 既定の 1。 */
+  gravity?: number;
+  /** 初期シミュレーション速度倍率。省略時は 1 (等速)。 */
+  speedScale?: number;
+  /** 初期デバッグ表示状態。省略時は false (非表示)。 */
+  debugEnabled?: boolean;
 }
 
 export interface SimulationInstance {
   stop(): void;
   step?(deltaMs: number): void;
+  /** 重力 (engine.gravity.y) を稼働中のまま書き換える。ワールド再構築は行わない。 */
+  setGravity(value: number): void;
+  /**
+   * ボール数の上限を稼働中のまま書き換える。上限を減らした場合は、
+   * 超過した分の既存ボールをその場で回収する (ワールド全体の再構築はしない)。
+   */
+  setMaxActiveBalls(value: number): void;
+  /** シミュレーション速度倍率を稼働中のまま書き換える。ワールド再構築は行わない。 */
+  setSpeedScale(value: number): void;
+  /** 当たり判定の描画や HUD 用の統計出力を切り替える。 */
+  setDebugEnabled(value: boolean): void;
+  /**
+   * 装置を初期状態に戻す。ページのリロードは行わず、また坂・シーソー等の
+   * 仕掛け (構造) も作り直さない。ボールを全て回収し、統計をゼロに戻して
+   * 最初の 1 個を再投入する。
+   */
+  reset(): void;
 }
 
 /** nudge 1 回あたりに加える速度の大きさ。ランダムな方向へ軽く押す程度に留める。 */
@@ -51,7 +74,9 @@ export function startSimulation(
   // 復帰待ちには「新規ボール検知時のみリセット」への変更 (domino.ts) を
   // それぞれ入れて詰まる構造そのものを直したため、5 に増やしても実測で
   // 団子化しないことを確認できた (5 分間の稼働で recoveredBalls が悪化しない)。
-  const maxActiveBalls = config.maxActiveBalls ?? 5;
+  // issue #6: 設定パネルからボール数の上限を稼働中に変更できるよう let にする
+  // (縮小時は setMaxActiveBalls 内で超過分を回収する。ワールドは再構築しない)。
+  let maxActiveBalls = config.maxActiveBalls ?? 5;
   const seed = config.seed ?? 12345;
   const fixedDeltaMs = config.fixedDeltaMs ?? 16.666;
   const maxStepsPerFrame = config.maxStepsPerFrame ?? 5;
@@ -65,6 +90,14 @@ export function startSimulation(
 
   const rng = createRng(seed);
   const { engine } = createPitagoraWorld();
+
+  // issue #6: 設定パネルの重力・速度は「稼働中のまま反映」する必要があるため、
+  // ワールドを再構築せず engine.gravity.y / speedScale を直接書き換える方式にする。
+  if (config.gravity !== undefined) {
+    engine.gravity.y = config.gravity;
+  }
+  let speedScale = config.speedScale ?? 1;
+  let debugEnabled = config.debugEnabled ?? false;
 
   const timestepCalc = createTimestepCalculator({
     fixedDeltaMs,
@@ -411,6 +444,24 @@ export function startSimulation(
     hasSpawned = true;
   };
 
+  /**
+   * ボールを 1 個、追跡状態ごと完全に取り除く (issue #6: setMaxActiveBalls の
+   * 縮小時回収・reset の全ボール回収で使う共通の後片付け)。
+   * 既存の「1. フェイルセーフ」「2b. スタック検知」ブロックは tick() 内で
+   * 同じ後片付けを個別に行っているためここでは触れない (スコープ外の変更を避ける)。
+   */
+  const removeBall = (ball: Matter.Body): void => {
+    const data = getBallData(ball);
+    if (data) {
+      stallTracker.forget(data.id);
+      nudgeTracker.forget(data.id);
+      countedRamp1.delete(data.id);
+      countedSeesaw.delete(data.id);
+      countedRamp2.delete(data.id);
+    }
+    Matter.Composite.remove(engine.world, ball);
+  };
+
   const updateStats = (): void => {
     const allBodies = Matter.Composite.allBodies(engine.world);
     const balls = allBodies.filter((b) => b.label === "ball");
@@ -463,7 +514,12 @@ export function startSimulation(
     // frameDelta を渡すと、物理はほぼ進んでいないのにエレベーターが瞬間移動したり、
     // 停滞検知が「数秒間動いていない」と誤判定して全ボールを回収したり、投入間隔だけ
     // 進んで復帰直後にボールが増えたりする。
-    const { steps, effectiveMs } = timestepCalc.update(frameDelta);
+    // issue #6: speedScale (0.25x〜2x) を実効経過時間そのものに掛けることで、
+    // 物理エンジン (Engine.update) だけでなく、同じ steps 分だけ回る
+    // onDeviceStep (elevator/launcher 等) やボール投入間隔 (msSinceLastSpawn) も
+    // まとめて同じ倍率で進む。fixedDeltaMs 自体は変えないため、
+    // 1 ステップあたりの物理精度は速度設定に関わらず一定に保たれる。
+    const { steps, effectiveMs } = timestepCalc.update(frameDelta * speedScale);
 
     // launcher のセンサー通過判定・elevator のキャリア駆動と受け渡しは、ボディの位置に
     // 依存する検知・駆動であり、物理更新と同じ 1 ステップ (fixedDeltaMs) 単位で評価する
@@ -658,7 +714,7 @@ export function startSimulation(
 
     updateStats();
 
-    renderWorld(ctx, engine, transform, cssWidth, cssHeight);
+    renderWorld(ctx, engine, transform, cssWidth, cssHeight, debugEnabled);
   };
 
   // RAF から駆動する自動ループ。1 フレーム分の更新 (tick) を実行した後、まだ稼働中なら
@@ -695,6 +751,68 @@ export function startSimulation(
       // requestAnimationFrame が予約され、既存の自動ループと並行して進行してしまう。
       const now = lastTime + deltaMs;
       tick(now);
+    },
+    setGravity(value: number): void {
+      // engine.gravity.y を直接書き換えるだけで、Matter.Engine.update は毎ステップ
+      // これを参照するため、ワールドを再構築せずその場で反映できる。
+      engine.gravity.y = value;
+    },
+    setMaxActiveBalls(value: number): void {
+      maxActiveBalls = value;
+
+      // 上限を減らした場合のみ、超過した分だけ既存ボールを回収する。増やす場合は
+      // 何もしない (次回以降の shouldSpawnBall 判定で自然に増える)。
+      const currentBalls = Matter.Composite.allBodies(engine.world).filter(
+        (b) => b.label === "ball"
+      );
+      const excess = currentBalls.length - maxActiveBalls;
+      for (let i = 0; i < excess; i += 1) {
+        removeBall(currentBalls[i]);
+      }
+    },
+    setSpeedScale(value: number): void {
+      speedScale = value;
+    },
+    setDebugEnabled(value: boolean): void {
+      debugEnabled = value;
+    },
+    reset(): void {
+      // 装置の構造 (坂・シーソー・振り子等の配置) は一切作り直さない。
+      // ボールを全て回収し、統計をゼロに戻して最初の 1 個を再投入するだけに留める。
+      const allBalls = Matter.Composite.allBodies(engine.world).filter(
+        (b) => b.label === "ball"
+      );
+      for (const ball of allBalls) {
+        removeBall(ball);
+      }
+
+      timestepCalc.reset();
+
+      elapsedMs = 0;
+      msSinceLastSpawn = 0;
+      minActiveBalls = Infinity;
+      recoveredBalls = 0;
+      outOfBoundsBalls = 0;
+      hasSpawned = false;
+
+      gimmicks.ramp1 = 0;
+      gimmicks.seesaw = 0;
+      gimmicks.launcher = 0;
+      gimmicks.ramp2 = 0;
+      gimmicks.elevator = 0;
+      gimmicks.branchLeft = 0;
+      gimmicks.branchRight = 0;
+      gimmicks.pendulum = 0;
+      gimmicks.domino = 0;
+      gimmicks.wheel = 0;
+      gimmicks.bounceFloor = 0;
+      gimmicks.landingBoost = 0;
+
+      spawnBall();
+      msSinceLastSpawn = 0;
+      nextDelayMs = nextSpawnDelay(rng, minSpawnDelayMs, maxSpawnDelayMs);
+
+      updateStats();
     },
   };
 }

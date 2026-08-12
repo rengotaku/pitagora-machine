@@ -19,4 +19,19 @@ describe("renderer", () => {
       renderWorld(ctx, engine, transform, 1600, 900);
     }).not.toThrow();
   });
+
+  it("issue #6: debugEnabled=true でもエラーなく呼び出せる (isSensor ボディの当たり判定描画)", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const { engine } = createPitagoraWorld();
+    const transform = fitWorldToCanvas(WORLD_WIDTH, WORLD_HEIGHT, 1600, 900);
+
+    expect(() => {
+      renderWorld(ctx, engine, transform, 1600, 900, true);
+    }).not.toThrow();
+  });
 });

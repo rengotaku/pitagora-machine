@@ -43,12 +43,19 @@ const BALL_SPIN_LINE_COLOR = "rgba(255, 255, 255, 0.5)";
 const FALLBACK_BALL_COLOR = "#e8552f";
 const FALLBACK_PART_COLOR = STEEL_COLOR;
 
+// デバッグ表示 (issue #6) 用の当たり判定の輪郭色。通常の輪郭・塗りとは
+// 明確に区別できる目立つ色にし、破線にして「これは実体ではなく検知範囲」と
+// 分かるようにする。
+const DEBUG_SENSOR_STROKE_COLOR = "rgba(232, 85, 47, 0.9)";
+const DEBUG_SENSOR_DASH: [number, number] = [6, 4];
+
 export function renderWorld(
   ctx: CanvasRenderingContext2D,
   engine: Matter.Engine,
   transform: ViewportTransform,
   cssWidth: number,
-  cssHeight: number
+  cssHeight: number,
+  debugEnabled = false
 ): void {
   // 1. レターボックス領域の背景塗りつぶし
   ctx.fillStyle = SURROUND_COLOR;
@@ -79,8 +86,6 @@ export function renderWorld(
     if (body.label === "ball") {
       drawBall(ctx, body);
     } else if (!body.isSensor) {
-      // isSensor な通過検知ボディ（ramp/launcher/elevator 等のセンサー矩形）は非表示。
-      // デバッグ表示が必要になったらここにフラグ分岐を追加する。
       // Matter.js は Body.create で全ボディに circleRadius: 0 を既定値として
       // 持たせる (undefined ではない) ため、真偽値判定 (truthy) で見る。
       // !== undefined で判定すると矩形ボディまで「円」と誤認され、
@@ -90,6 +95,42 @@ export function renderWorld(
       } else {
         drawPolygonPart(ctx, body);
       }
+    } else if (debugEnabled) {
+      // isSensor な通過検知ボディ（ramp/launcher/elevator 等のセンサー矩形）は
+      // 通常時は非表示。デバッグ表示が有効なときだけ、ここで初めて輪郭を
+      // 重ねて可視化する (issue #6)。
+      drawDebugSensor(ctx, body);
+    }
+  }
+
+  ctx.restore();
+}
+
+/**
+ * isSensor なボディ（通過検知の当たり判定）の輪郭を破線で描画する。
+ * デバッグ表示が有効なときだけ呼ばれる。実体の色・塗りとは異なる目立つ色にし、
+ * 「検知範囲であって実体ではない」ことが一目でわかるようにする。
+ */
+function drawDebugSensor(ctx: CanvasRenderingContext2D, body: Matter.Body): void {
+  ctx.save();
+  ctx.setLineDash(DEBUG_SENSOR_DASH);
+  ctx.strokeStyle = DEBUG_SENSOR_STROKE_COLOR;
+  ctx.lineWidth = 1.5;
+
+  if (body.circleRadius) {
+    ctx.beginPath();
+    ctx.arc(body.position.x, body.position.y, body.circleRadius, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    const vertices = body.vertices;
+    if (vertices.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(vertices[0].x, vertices[0].y);
+      for (let i = 1; i < vertices.length; i += 1) {
+        ctx.lineTo(vertices[i].x, vertices[i].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
     }
   }
 
