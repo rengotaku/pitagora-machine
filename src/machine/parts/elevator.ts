@@ -152,11 +152,30 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
 
       // 運搬待ちのボールを記録しておく。呼び出し側はこれを見て、
       // 待機中のボールを押し出し(nudge)や停滞検知の対象から外す。
+      //
+      // carrier 上のボール (ballsInCarrier) だけでは足りない。carrier が上昇・
+      // 下降している間は判定範囲が currentY 付近に限定されるため、その間に
+      // 固定待機床へ到着した後続ボールが漏れる。漏れると「正常に待っている
+      // だけ」のボールが 1.2 秒後に押し出され、待機床から弾き出されて落下・
+      // 回収を誘発する。carrier の位置に関係なく、待機床の上も常に見る。
       heldBallIds.clear();
-      for (const b of ballsInCarrier) {
+      const rememberHeld = (b: Matter.Body): void => {
         const id = (b.plugin as { ballData?: { id: number } })?.ballData?.id;
         if (id !== undefined) {
           heldBallIds.add(id);
+        }
+      };
+      for (const b of ballsInCarrier) {
+        rememberHeld(b);
+      }
+      const waitingFloorTop = waitingFloor.position.y - 8;
+      for (const b of balls) {
+        const onWaitingFloor =
+          Math.abs(b.position.x - x) < 80 &&
+          b.position.y >= waitingFloorTop - 60 &&
+          b.position.y <= waitingFloorTop + 12;
+        if (onWaitingFloor) {
+          rememberHeld(b);
         }
       }
 
