@@ -786,6 +786,22 @@ export function startSimulation(
         removeBall(ball);
       }
 
+      // レビュー指摘 #2: 装置がしばらく稼働すると、ボール・統計だけでなく仕掛け側にも
+      // 状態が蓄積する (シーソー・カウンターウェイトが傾いたまま、エレベーターが移動中の
+      // 高さと状態機械、ドミノが倒れた姿勢、振り子・ホイールの回転位相、分岐ゲートの
+      // フラップ角度と偏り補正カウント、発射装置・バウンド床の追跡中ボール記録)。
+      // 「装置を初期状態に戻す」という reset() の契約を満たすため、各パーツにも
+      // 明示的に reset() を実行させる。ramp 系 (完全に static) は状態を持たないため
+      // reset() を持たない。
+      seesaw.reset();
+      launcher.reset();
+      elevator.reset();
+      branchGate.reset();
+      pendulum.reset();
+      dominoRow.reset();
+      wheel.reset();
+      bounceFloor.reset();
+
       timestepCalc.reset();
 
       elapsedMs = 0;

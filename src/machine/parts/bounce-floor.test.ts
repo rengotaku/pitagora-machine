@@ -34,4 +34,28 @@ describe("bounce-floor", () => {
     expect(bounces).toBe(1);
     expect(ball.velocity).toEqual(afterFirst);
   });
+
+  it("reset() で通過記録がクリアされ、同じボールが再びバウンドを受けられる (レビュー指摘 #2 回帰テスト)", () => {
+    const floor = createBounceFloor({ x: 850, y: 550, angle: -0.325, bounceSpeed: 6 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(1), 850, 550);
+    Matter.Body.setVelocity(ball, { x: 4, y: 1 });
+    Matter.Composite.add(engine.world, [floor.sensor, ball]);
+
+    let bounces = 0;
+    floor.update(engine, () => {
+      bounces += 1;
+    });
+    floor.update(engine, () => {
+      bounces += 1;
+    });
+    expect(bounces).toBe(1);
+
+    floor.reset();
+
+    floor.update(engine, () => {
+      bounces += 1;
+    });
+    expect(bounces).toBe(2);
+  });
 });

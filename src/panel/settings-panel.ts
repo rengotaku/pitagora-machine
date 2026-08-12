@@ -121,17 +121,24 @@ export function mountSettingsPanel(simulation: SimulationInstance): void {
     panel.hidden = !isOpen;
     toggleButton.setAttribute("aria-expanded", String(isOpen));
     toggleButton.setAttribute("aria-label", isOpen ? "設定を閉じる" : "設定を開く");
-    if (isOpen) {
-      gravityInput.focus();
-    }
   };
 
   toggleButton.addEventListener("click", (event) => {
     // document 側の click リスナー (外側クリック判定) にまで伝播すると、
     // 開いた直後の同一クリックが「外側クリック」と誤認されて即座に閉じてしまうため止める。
     event.stopPropagation();
+    const wasOpen = isOpen;
     isOpen = togglePanel(isOpen);
     syncVisibility();
+    // 初回の「開く」操作 (閉→開) のときだけ重力入力へフォーカスする。パネル内の
+    // 他の操作 (スライダー・チェックボックスのクリック) は document の click
+    // リスナーを経由して syncVisibility() を呼ぶが、isOpen 自体は変化しない
+    // (handleInsideClick) ためここには来ない。syncVisibility() 側で毎回 focus()
+    // していると、パネル内クリックのたびに重力スライダーへフォーカスが奪われ、
+    // 直後の矢印キー操作が意図せず重力を変更してしまっていた (レビュー指摘 #1)。
+    if (isOpen && !wasOpen) {
+      gravityInput.focus();
+    }
   });
 
   document.addEventListener("click", (event) => {

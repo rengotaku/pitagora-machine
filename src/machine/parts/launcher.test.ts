@@ -149,4 +149,33 @@ describe("launcher", () => {
 
     expect(boosts).toBe(0);
   });
+
+  it("reset() で発射済み記録がクリアされ、sensor 内に留まるボールが即座に再発射対象に戻る (レビュー指摘 #2 回帰テスト)", () => {
+    const launcher = createLauncher({ x: 1150, y: 470, launchVx: 12.5, launchVy: -16.5 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(1), 1150, 450);
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    let launches = 0;
+    launcher.update(engine, 16.666, () => {
+      launches += 1;
+    });
+    expect(launches).toBe(1);
+
+    // sensor 内に留まったまま reset せずに update しても、タイムアウト (1500ms) 前
+    // なので再発射されない
+    Matter.Body.setPosition(ball, { x: 1150, y: 450 });
+    launcher.update(engine, 16.666, () => {
+      launches += 1;
+    });
+    expect(launches).toBe(1);
+
+    launcher.reset();
+
+    Matter.Body.setPosition(ball, { x: 1150, y: 450 });
+    launcher.update(engine, 16.666, () => {
+      launches += 1;
+    });
+    expect(launches).toBe(2);
+  });
 });

@@ -27,6 +27,8 @@ export interface LauncherComponent {
     onLaunch?: (ballId: number) => void,
     onLandingBoost?: (ballId: number) => void
   ): void;
+  /** 発射済みボールの追跡状態を破棄する (発射台本体は静的で位置は変化しないため対象外)。 */
+  reset(): void;
 }
 
 /**
@@ -206,6 +208,9 @@ export function createLauncher(options: LauncherOptions = {}): LauncherComponent
           launchedBalls.delete(id);
         }
       }
+    },
+    reset(): void {
+      launchedBalls.clear();
     },
   };
 }

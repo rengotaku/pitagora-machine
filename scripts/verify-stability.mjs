@@ -23,6 +23,8 @@
  * 前提: headless Chrome が --remote-debugging-port=<CDP_PORT> で起動済みであること。
  * dev server / Chrome の起動・停止はこのスクリプトの責務ではない。
  */
+import { extractConsoleError } from "./verify-console.mjs";
+
 const [, , pageUrl, outDir, intervalRaw, samplesRaw, label = "run"] = process.argv;
 
 if (!pageUrl || !outDir) {
@@ -86,12 +88,18 @@ const { ws, send } = await connect(target.webSocketDebuggerUrl);
 await send("Page.enable");
 await send("Runtime.enable");
 
-// コンソールエラーを拾う (描画が落ちていても静止画では気づけないため)
+// コンソールエラーを拾う (描画が落ちていても静止画では気づけないため)。
+// Runtime.exceptionThrown は「未処理の例外」しか通知しないため、検証対象が
+// try/catch で捕まえたうえで console.error(...) だけで異常を報告するケースは
+// これだけでは検知できない (レビュー指摘 #3)。console.error(...) 自体は
+// Runtime.consoleAPICalled (type: "error") として通知されるため、あわせて購読する
+// (判定ロジックは verify-console.mjs の extractConsoleError に切り出してテストする)。
 const consoleErrors = [];
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);
-  if (msg.method === "Runtime.exceptionThrown") {
-    consoleErrors.push(msg.params?.exceptionDetails?.exception?.description ?? "unknown");
+  const error = extractConsoleError(msg);
+  if (error !== null) {
+    consoleErrors.push(error);
   }
 });
 

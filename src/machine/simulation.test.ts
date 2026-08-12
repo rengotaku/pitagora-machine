@@ -170,4 +170,55 @@ describe("simulation", () => {
 
     sim.stop();
   });
+
+  it("issue #6: 仕掛けが実際に作動した状態から reset() すると、仕掛けごとの作動回数もゼロに戻る (レビュー指摘 #2 回帰テスト)", () => {
+    // レビュー指摘: 装置がしばらく稼働してドミノ・シーソー・振り子・エレベーターが
+    // 動いた後に reset() すると、ボールと統計しか初期化されず、各 Matter body の
+    // 位置・角度・速度や仕掛け内部の保持状態が残ったままになっていた。
+    // ここでは「仕掛けが実際に 1 回以上作動した状態」を作ってから reset() し、
+    // gimmicks の全カウントがゼロに戻ることを回帰確認する (各仕掛けの body の
+    // 位置・角度が生成時の姿勢に戻ることは src/machine/parts/*.test.ts の
+    // 個別テストで検証済み)。
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, {
+      seed: 900,
+      maxActiveBalls: 5,
+      minSpawnDelayMs: 500,
+      maxSpawnDelayMs: 800,
+    });
+
+    for (let i = 0; i < 2000; i += 1) {
+      sim.step?.(16.666);
+    }
+
+    const beforeReset = window.__pitagora?.gimmicks;
+    expect(beforeReset).toBeDefined();
+    const totalFiredBeforeReset = Object.values(beforeReset ?? {}).reduce(
+      (sum, count) => sum + count,
+      0
+    );
+    // 少なくともいずれかの仕掛けが実際に作動していること (前提の成立確認)
+    expect(totalFiredBeforeReset).toBeGreaterThan(0);
+
+    expect(() => sim.reset()).not.toThrow();
+
+    expect(window.__pitagora?.elapsedMs).toBe(0);
+    expect(window.__pitagora?.recoveredBalls).toBe(0);
+    expect(window.__pitagora?.outOfBoundsBalls).toBe(0);
+
+    const afterReset = window.__pitagora?.gimmicks;
+    expect(afterReset).toBeDefined();
+    for (const [name, count] of Object.entries(afterReset ?? {})) {
+      expect(count, `gimmicks.${name} が reset 後もゼロに戻っていない`).toBe(0);
+    }
+
+    // reset 後も装置がクラッシュせずに稼働し続けられること
+    expect(() => sim.step?.(16.666)).not.toThrow();
+
+    sim.stop();
+  });
 });

@@ -27,10 +27,15 @@
    `Page.captureScreenshot` で PNG を取得し保存する。数値だけでは「詰まって
    同じ位置で止まっているボール」のような視覚的な異常を見落とすことがあるため、
    数値記録と画像記録の両方を毎回セットで残す。
-4. **コンソール例外も監視する。**
-   `Runtime.exceptionThrown` イベントを購読し、検証中に発生した JS 例外を
+4. **コンソール例外・コンソールエラーの両方を監視する。**
+   `Runtime.exceptionThrown` イベントを購読し、検証中に発生した未処理の JS 例外を
    全て記録する。例外が起きて `requestAnimationFrame` ループが停止していても、
    直前のフレームの静止画は正常に見えることがあるため、画像だけに頼らない。
+   ただし `Runtime.exceptionThrown` は「未処理の例外」しか通知しないため、
+   検証対象が例外を投げずに `console.error(...)` で異常を報告するケースは
+   これだけでは検知できない。`console.error(...)` 自体は
+   `Runtime.consoleAPICalled` (`type: "error"`) として通知されるため、
+   あわせて購読し、両方をまとめて `consoleErrorCount` として集計する。
 
 この考え方を実装したものが `scripts/verify-stability.mjs` です。
 
@@ -69,7 +74,7 @@ CDP_PORT=9333 node scripts/verify-stability.mjs \
 | 3 | 平均 fps | 55 以上 (60fps 目標に対し、多少の変動は許容する) | `averageFps` |
 | 4 | 最低 fps | 30 以上 (体感でカクつきが気になり始める一般的な下限) | `minFps` |
 | 5 | 仕掛けごとの作動回数 | `gimmicks` の全フィールドが検証終了時点で 1 以上 (未到達の仕掛けが無いこと) | `gimmicksAllFiredAtLeastOnce` が `true` |
-| 6 | コンソールエラー | 0 件 | `consoleErrorCount` |
+| 6 | コンソールエラー | 0 件 (`console.error(...)` による報告と、未処理の JS 例外の合計) | `consoleErrorCount` |
 
 `recoveredBalls` (スタック検知による回収) と `outOfBoundsBalls` (画面外脱落からの回収) は、
 0 より大きくても不合格にはしない。これらは詰まり対策のフェイルセーフが正常に機能した

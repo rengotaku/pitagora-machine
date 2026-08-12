@@ -98,4 +98,30 @@ describe("route-choice (TC-1 ~ TC-4)", () => {
       createRouteSelector({ leftWeight: 1, rightWeight: 1, maxStreak: 1.5 })
     ).toThrow();
   });
+
+  it("追加テスト: reset() で偏り補正の連続選択カウントが破棄される (レビュー指摘 #2 回帰テスト)", () => {
+    // 稼働中に片側へ streak が積み上がった状態で reset() すると、次の choose() は
+    // 「連続 0 回」から再開するはず。破棄されていないと、reset 直後の 1 回目から
+    // 残っていた streak の影響で偏り補正が誤発火する。
+    const maxStreak = 3;
+    const selector = createRouteSelector({ leftWeight: 1, rightWeight: 1, maxStreak });
+    const alwaysZeroRng = () => 0;
+
+    // maxStreak 回連続で left を選ばせ、streak を積み上げる
+    for (let i = 0; i < maxStreak; i += 1) {
+      expect(selector.choose(alwaysZeroRng)).toBe("left");
+    }
+    // 積み上げた streak を破棄せずに呼ぶと、次は偏り補正で強制的に right になる
+    // (この時点ではまだ reset していないことの確認)
+    expect(selector.choose(alwaysZeroRng)).toBe("right");
+
+    selector.reset();
+
+    // reset 後は streak が 0 に戻っているため、alwaysZeroRng (常に left を選ぶ
+    // pickWeighted) が maxStreak 回連続で left を返せるはず。偏り補正が
+    // 引き継がれていれば 1 回目から right になってしまう。
+    for (let i = 0; i < maxStreak; i += 1) {
+      expect(selector.choose(alwaysZeroRng)).toBe("left");
+    }
+  });
 });

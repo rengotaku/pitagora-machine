@@ -25,6 +25,11 @@ export interface BranchGateComponent {
     rng: Rng,
     onChoice?: (side: RouteSide, ballId: number) => void
   ): void;
+  /**
+   * フラップの角度を生成時の中立位置 (0) へ戻し、判定済みボールの記録・
+   * 偏り補正の連続選択カウント (route-choice.ts の selector) も破棄する。
+   */
+  reset(): void;
 }
 
 /**
@@ -106,6 +111,11 @@ export function createBranchGate(options: BranchGateOptions): BranchGateComponen
           decidedBalls.delete(ballId);
         }
       }
+    },
+    reset(): void {
+      setBodyAngle(flap, 0, true);
+      decidedBalls.clear();
+      selector.reset();
     },
   };
 }

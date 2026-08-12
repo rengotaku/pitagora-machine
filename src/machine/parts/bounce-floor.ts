@@ -18,6 +18,8 @@ export interface BounceFloorComponent {
   bodies: Matter.Body[];
   sensor: Matter.Body;
   update(engine: Matter.Engine, onBounce?: (ballId: number) => void): void;
+  /** 通過検知の記録を破棄する (床本体は静的で位置・角度は変化しないため対象外)。 */
+  reset(): void;
 }
 
 /**
@@ -93,6 +95,9 @@ export function createBounceFloor(options: BounceFloorOptions): BounceFloorCompo
           bouncedBalls.delete(ballId);
         }
       }
+    },
+    reset(): void {
+      bouncedBalls.clear();
     },
   };
 }

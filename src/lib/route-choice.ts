@@ -20,6 +20,8 @@ export interface RouteSelectorOptions {
 
 export interface RouteSelector {
   choose(rng: Rng): RouteSide;
+  /** 偏り補正の連続選択カウントを破棄し、生成直後の状態 (連続 0 回) へ戻す。 */
+  reset(): void;
 }
 
 const SIDES: readonly RouteSide[] = ["left", "right"];
@@ -65,6 +67,10 @@ export function createRouteSelector(options: RouteSelectorOptions): RouteSelecto
       lastSide = side;
 
       return side;
+    },
+    reset(): void {
+      lastSide = null;
+      streak = 0;
     },
   };
 }

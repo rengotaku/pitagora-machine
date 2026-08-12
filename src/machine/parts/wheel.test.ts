@@ -36,4 +36,22 @@ describe("wheel", () => {
     expect(bladeA.angle).toBeCloseTo(bladeB.angle, 5);
     expect(bladeA.angle).toBeGreaterThan(0);
   });
+
+  it("reset() で羽根の回転角度が初期角度 (0) に戻り、通過検知記録もクリアされる (レビュー指摘 #2 回帰テスト)", () => {
+    const wheel = createWheel({ x: 650, y: 558, sensorY: 615 });
+    const engine = Matter.Engine.create();
+    Matter.Composite.add(engine.world, wheel.bodies);
+
+    for (let i = 0; i < 10; i += 1) {
+      wheel.update(engine, 100);
+    }
+    const [hub, bladeA, bladeB] = wheel.bodies;
+    expect(hub.angle).not.toBe(0);
+
+    wheel.reset();
+
+    expect(hub.angle).toBeCloseTo(0, 5);
+    expect(bladeA.angle).toBeCloseTo(0, 5);
+    expect(bladeB.angle).toBeCloseTo(0, 5);
+  });
 });

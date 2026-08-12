@@ -13,6 +13,8 @@ export interface SeesawComponent {
   constraints: Matter.Constraint[];
   board: Matter.Body;
   sensor: Matter.Body;
+  /** 板・カウンターウェイトの位置・角度・速度を生成時の静止姿勢へ戻す。 */
+  reset(): void;
 }
 
 /**
@@ -104,5 +106,19 @@ export function createSeesaw(options: SeesawOptions = {}): SeesawComponent {
     constraints: [pivot, weightConstraint],
     board,
     sensor,
+    reset(): void {
+      Matter.Body.setPosition(board, { x, y });
+      Matter.Body.setAngle(board, initialAngle);
+      Matter.Body.setVelocity(board, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(board, 0);
+
+      Matter.Body.setPosition(counterWeight, {
+        x: attachWorldX,
+        y: attachWorldY + pendulumLength,
+      });
+      Matter.Body.setAngle(counterWeight, 0);
+      Matter.Body.setVelocity(counterWeight, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(counterWeight, 0);
+    },
   };
 }

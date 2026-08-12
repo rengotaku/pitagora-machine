@@ -20,6 +20,8 @@ export interface WheelComponent {
   bodies: Matter.Body[];
   sensor: Matter.Body;
   update(engine: Matter.Engine, deltaMs: number, onPass?: (ballId: number) => void): void;
+  /** 羽根の回転角度を生成時の初期角度 (0) へ戻し、通過検知の記録も破棄する。 */
+  reset(): void;
 }
 
 /**
@@ -121,6 +123,12 @@ export function createWheel(options: WheelOptions): WheelComponent {
           passedBalls.delete(ballId);
         }
       }
+    },
+    reset(): void {
+      setBodyAngle(hub, 0, true);
+      setBodyAngle(bladeA, 0, true);
+      setBodyAngle(bladeB, 0, true);
+      passedBalls.clear();
     },
   };
 }
