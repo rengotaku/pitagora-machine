@@ -301,7 +301,12 @@ export function startSimulation(
       fpsTimer = 0;
     }
 
-    const { steps } = timestepCalc.update(frameDelta);
+    // タブのバックグラウンド復帰等で frameDelta が巨大化しても、物理エンジン以外の
+    // 時間依存ロジック（エレベーター駆動・停滞検知）には打ち切り後の実効経過時間
+    // (effectiveMs) を渡し、物理世界が実際に進んだ量と整合させる。生の frameDelta を
+    // 渡すと、物理はほぼ進んでいないのにエレベーターが瞬間移動したり、停滞検知が
+    // 「数秒間動いていない」と誤判定して全ボールを回収してしまう。
+    const { steps, effectiveMs } = timestepCalc.update(frameDelta);
     for (let i = 0; i < steps; i += 1) {
       Matter.Engine.update(engine, fixedDeltaMs);
     }
@@ -310,7 +315,7 @@ export function startSimulation(
       gimmicks.launcher += 1;
     });
 
-    elevator.update(engine, frameDelta, () => {
+    elevator.update(engine, effectiveMs, () => {
       gimmicks.elevator += 1;
     });
 
@@ -383,7 +388,7 @@ export function startSimulation(
       }
     }
 
-    const stalledIds = stallTracker.update(samples, frameDelta);
+    const stalledIds = stallTracker.update(samples, effectiveMs);
 
     for (const stalledId of stalledIds) {
       const targetBall = ballMap.get(stalledId);

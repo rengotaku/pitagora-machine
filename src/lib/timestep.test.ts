@@ -101,3 +101,44 @@ describe("timestep (TC-1 ~ TC-6)", () => {
     expect(res.remainderMs).toBeCloseTo(8, 3);
   });
 });
+
+describe("timestep: effectiveMs (レビュー指摘 #2 回帰テスト)", () => {
+  // タブのバックグラウンド復帰などで elapsedMs が maxStepsPerFrame を大幅に超えても、
+  // 装置側ロジック (エレベーター駆動・停滞検知) に渡る実効経過時間は
+  // maxStepsPerFrame * fixedDeltaMs を超えてはならない。これを超えると、物理エンジンは
+  // 打ち切られて僅かしか進んでいないのに、エレベーターが瞬間移動したり停滞検知が
+  // 「数秒間動いていない」と誤判定して全ボールを回収してしまう。
+  it("巨大な elapsed (タブ復帰想定, 3000ms) でも effectiveMs は maxStepsPerFrame * fixedDeltaMs を超えない", () => {
+    const fixedDeltaMs = 16.666;
+    const maxStepsPerFrame = 5;
+    const calc = createTimestepCalculator({ fixedDeltaMs, maxStepsPerFrame });
+
+    const result = calc.update(3000);
+
+    expect(result.steps).toBe(maxStepsPerFrame);
+    expect(result.effectiveMs).toBeLessThanOrEqual(maxStepsPerFrame * fixedDeltaMs);
+    expect(result.effectiveMs).toBeCloseTo(maxStepsPerFrame * fixedDeltaMs, 3);
+  });
+
+  it("打ち切りが発生しない通常フレームでは effectiveMs = steps * fixedDeltaMs と一致する", () => {
+    const fixedDeltaMs = 16.666;
+    const maxStepsPerFrame = 5;
+    const calc = createTimestepCalculator({ fixedDeltaMs, maxStepsPerFrame });
+
+    const result = calc.update(16.666);
+
+    expect(result.steps).toBe(1);
+    expect(result.effectiveMs).toBeCloseTo(fixedDeltaMs, 3);
+  });
+
+  it("端数のみで steps=0 のフレームでは effectiveMs=0 になる", () => {
+    const fixedDeltaMs = 16.666;
+    const maxStepsPerFrame = 5;
+    const calc = createTimestepCalculator({ fixedDeltaMs, maxStepsPerFrame });
+
+    const result = calc.update(8);
+
+    expect(result.steps).toBe(0);
+    expect(result.effectiveMs).toBe(0);
+  });
+});

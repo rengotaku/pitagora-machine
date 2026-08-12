@@ -60,7 +60,9 @@ export function renderWorld(
       ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
       ctx.lineWidth = 2;
       ctx.stroke();
-    } else {
+    } else if (!body.isSensor) {
+      // isSensor な通過検知ボディ（ramp/launcher/elevator 等のセンサー矩形）は非表示。
+      // デバッグ表示が必要になったらここにフラグ分岐を追加する。
       // 多角形（壁、床、坂パーツ）
       const vertices = body.vertices;
       if (vertices.length > 0) {

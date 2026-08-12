@@ -10,6 +10,15 @@ export interface TimestepOptions {
 export interface TimestepResult {
   steps: number;
   remainderMs: number;
+  /**
+   * 今フレームで実際に物理エンジンを進めた実効経過時間 (steps * fixedDeltaMs)。
+   * タブのバックグラウンド復帰などで elapsedMs が maxStepsPerFrame を超える巨大な
+   * 値になっても、この値は常に maxStepsPerFrame * fixedDeltaMs 以下に収まる。
+   * 物理エンジン以外の時間依存ロジック（エレベーター駆動・停滞検知など）は、
+   * 生の elapsedMs ではなくこの値を時間源として使うことで、物理世界の進み具合と
+   * 整合させる。
+   */
+  effectiveMs: number;
 }
 
 export interface TimestepCalculator {
@@ -61,6 +70,7 @@ export function createTimestepCalculator(options: TimestepOptions): TimestepCalc
         return {
           steps: maxStepsPerFrame,
           remainderMs: 0,
+          effectiveMs: maxStepsPerFrame * fixedDeltaMs,
         };
       }
 
@@ -71,6 +81,7 @@ export function createTimestepCalculator(options: TimestepOptions): TimestepCalc
       return {
         steps,
         remainderMs,
+        effectiveMs: steps * fixedDeltaMs,
       };
     },
 
