@@ -12,6 +12,7 @@ export interface GimmickStats {
   bounceFloor: number;
   /** 発射装置から坂2 へ着地した直後に速度を補正した回数 */
   landingBoost: number;
+  lowerPendulum: number;
 }
 
 export interface PitagoraStats {
