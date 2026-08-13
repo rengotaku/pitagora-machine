@@ -187,17 +187,14 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
           const state = launchedBalls.get(ballId)!;
 
           if (!state.launched) {
-            // 整列開始条件: ボール中心がセンサー内、または接近タイムアウト (600ms)、または reset 直後
-            const isCenterInSensor =
-              Math.abs(ball.position.x - x) <= 110 &&
-              Math.abs(ball.position.y - sensorCenterY) <= 20;
+            state.approachElapsedMs += deltaMs;
+            // 引き込み (整列) 開始条件: 水平速度が正 (右向き)、または接近タイムアウト、または reset 直後
+            const isMovingRight = ball.velocity.x > 0;
             const isApproachTimeout =
               state.approachElapsedMs >= LAUNCH_APPROACH_TIMEOUT_MS;
 
-            if (isCenterInSensor || isApproachTimeout || isResetState) {
+            if (isMovingRight || isApproachTimeout || isResetState) {
               state.aligning = true;
-            } else {
-              state.approachElapsedMs += deltaMs;
             }
 
             if (state.aligning) {

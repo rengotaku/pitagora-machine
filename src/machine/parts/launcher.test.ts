@@ -21,7 +21,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 12.5, launchVy: -16.5 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(1), 1150, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     let launches = 0;
@@ -38,7 +38,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 12.5, launchVy: -16.5 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(2), 1150, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, ball);
 
     let launches = 0;
@@ -73,7 +73,7 @@ describe("launcher", () => {
     });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(3), 1150, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     let launches = 0;
@@ -128,7 +128,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 5.5, launchVy: -4.2 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(4), 1150, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     launcher.update(engine, 16.666, undefined, undefined);
@@ -153,7 +153,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 12.5, launchVy: -16.5 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(1), 1150, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     let launches = 0;
@@ -171,6 +171,7 @@ describe("launcher", () => {
     launcher.reset();
 
     Matter.Body.setPosition(ball, { x: 1150, y: 450 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     launcher.update(engine, 16.666, () => {
       launches += 1;
     });
@@ -184,7 +185,7 @@ describe("launcher", () => {
     const initX = 1050;
     const initY = 450; // 発射位置 (1150, 450) から 100px 離れた位置 (センサー内)
     const ball = createBall(createRng(1), initX, initY);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     launcher.update(engine, 16.666);
@@ -198,7 +199,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 5.5, launchVy: -4.2 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(2), 1050, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     let launches = 0;
@@ -214,7 +215,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 5.5, launchVy: -4.2 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(3), 1050, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     let launches = 0;
@@ -237,7 +238,7 @@ describe("launcher", () => {
     const launcher = createLauncher({ x: 1150, y: 470, launchVx: 5.5, launchVy: -4.2 });
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(4), 1050, 450);
-    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
     Matter.Composite.add(engine.world, [launcher.sensor, ball]);
 
     const initialMask = ball.collisionFilter.mask;
@@ -278,5 +279,67 @@ describe("launcher", () => {
     expect(launches).toBe(0);
     // 追跡状態が開始されていること (reset() を呼んだ際に追跡がクリアされる正常挙動で間接検証)
     expect(() => launcher.reset()).not.toThrow();
+  });
+
+  it("右向きに動いているボールは引き込みが始まる", () => {
+    const launcher = createLauncher({ x: 1150, y: 470 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(1), 1050, 450);
+    Matter.Body.setVelocity(ball, { x: 3, y: 0 });
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    launcher.update(engine, 16.666);
+
+    expect(ball.collisionFilter.mask).toBe(0);
+  });
+
+  it("水平速度がちょうど 0 のボールは即座に引き込まれない", () => {
+    const launcher = createLauncher({ x: 1150, y: 470 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(1), 1050, 450);
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    const initialMask = ball.collisionFilter.mask;
+    let launched = false;
+    launcher.update(engine, 16.666, () => {
+      launched = true;
+    });
+
+    expect(ball.collisionFilter.mask).toBe(initialMask);
+    expect(launched).toBe(false);
+  });
+
+  it("左向きに動いているボールは引き込まれない", () => {
+    const launcher = createLauncher({ x: 1150, y: 470 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(2), 1050, 450);
+    Matter.Body.setVelocity(ball, { x: -3, y: 0 });
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    const initialMask = ball.collisionFilter.mask;
+    let launched = false;
+    launcher.update(engine, 16.666, () => {
+      launched = true;
+    });
+
+    expect(ball.collisionFilter.mask).toBe(initialMask);
+    expect(launched).toBe(false);
+  });
+
+  it("一定時間 vx > 0 にならなくてもタイムアウトで引き込みが始まる", () => {
+    const launcher = createLauncher({ x: 1150, y: 470 });
+    const engine = Matter.Engine.create();
+    const ball = createBall(createRng(3), 1050, 450);
+    Matter.Body.setVelocity(ball, { x: -3, y: 0 });
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    // タイムアウト前 (600ms 未満) は引き込まれない
+    launcher.update(engine, 500);
+    expect(ball.collisionFilter.mask).not.toBe(0);
+
+    // タイムアウト時間 (600ms) 以上経過で引き込みが始まる (mask が 0 になる)
+    launcher.update(engine, 200);
+    expect(ball.collisionFilter.mask).toBe(0);
   });
 });
