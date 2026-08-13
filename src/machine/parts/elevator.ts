@@ -1,5 +1,6 @@
 import Matter from "matter-js";
 import { BIRCH_COLOR, STEEL_COLOR } from "../../config";
+import { setBodyPosition } from "../kinematic";
 
 export interface ElevatorOptions {
   x?: number;
@@ -17,17 +18,13 @@ export interface ElevatorComponent {
     deltaMs: number,
     onDispense?: (ballId: number) => void
   ): void;
-  /**
-   * キャリア上または待機床で運搬待ちのボールかどうか。
-   * この状態のボールは「動いていない」が詰まっているわけではないので、
-   * 押し出し(nudge)や停滞検知の対象から外す必要がある。
-   */
   isHolding(ballId: number): boolean;
-  /**
-   * 状態機械・キャリア位置を生成直後の状態 (底で待機中) に戻す。
-   * ボール側の後始末 (回収) は呼び出し側 (simulation.ts) の責務。
-   */
   reset(): void;
+}
+
+interface AligningState {
+  alignSteps: number;
+  originalMask: number;
 }
 
 /**
@@ -46,47 +43,30 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     "waiting_bottom";
   let stateTimer = 0;
 
-  // キャリアーの底板（シュートから勢いよく飛び込むボールの着地ばらつきを吸収できる
-  // 広さを確保する。狭いと自由落下の放物線が受け皿を飛び越えて床まで落ちてしまう）。
-  // 薄い板 (旧 14px) だと、勢いよく落下するボールが 1 ステップの間に板を
-  // すり抜けてしまうことがあったため、厚みを大きく確保して確実に受け止める
   const carrierBase = Matter.Bodies.rectangle(x, currentY + 24, 150, 40, {
     isStatic: true,
     label: "elevator_carrier",
     plugin: { color, material: "wood", moving: true },
   });
 
-  // 左壁（高めにしてこぼれ防止）
   const carrierLeftWall = Matter.Bodies.rectangle(x - 70, currentY - 8, 14, 60, {
     isStatic: true,
     label: "elevator_carrier",
     plugin: { color, material: "wood", moving: true },
   });
 
-  // 右壁（シュートから勢いよく落ちてくるボールを受け止められる高さを確保しつつ、
-  // 上部での排出は setVelocity で強制するため妨げにならない）
   const carrierRightWall = Matter.Bodies.rectangle(x + 75, currentY - 6, 14, 70, {
     isStatic: true,
     label: "elevator_carrier",
     plugin: { color, material: "wood", moving: true },
   });
 
-  // 待機用の固定床。carrier が上昇中で不在の間、シュートから次々に到着する
-  // ボールを受け止めて待たせる。これが無いと、複数ボールが短い間隔で到着する
-  // 状況 (issue #4 で同時稼働数を増やした結果) で、carrier が上昇中に後続の
-  // ボールが到着した際、受け止める床が無く地面まで落下し続けてしまい、
-  // stall 検知に頼らないと回収できない詰まりになっていた (実測で確認)。
-  // carrierBase 下面 (waiting_bottom 時 bottomY+44) との間に 20px 以上の隙間を
-  // 空ける (隙間が数 px 程度しか無いと、ボールがその隙間で挟まって完全に
-  // 動けなくなる状態を実測で確認した)。地面 (ground 上面) にも接触しない
-  // 高さに収める。
   const waitingFloor = Matter.Bodies.rectangle(x, bottomY + 72, 150, 16, {
     isStatic: true,
     label: "elevator_carrier",
     plugin: { color, material: "wood", moving: false },
   });
 
-  // ガイドレール（金属）
   const rail = Matter.Bodies.rectangle(
     x - 85,
     (bottomY + topY) / 2,
@@ -99,7 +79,6 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     }
   );
 
-  // 通過検知用センサー（最上部付近）
   const sensor = Matter.Bodies.rectangle(x + 30, topY, 60, 40, {
     isStatic: true,
     isSensor: true,
@@ -118,14 +97,20 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
 
   const updatePositions = (newY: number): void => {
     currentY = newY;
-    Matter.Body.setPosition(carrierBase, { x, y: currentY + 24 });
-    Matter.Body.setPosition(carrierLeftWall, { x: x - 70, y: currentY - 8 });
-    Matter.Body.setPosition(carrierRightWall, { x: x + 75, y: currentY - 6 });
+    setBodyPosition(carrierBase, { x, y: currentY + 24 }, true);
+    setBodyPosition(carrierLeftWall, { x: x - 70, y: currentY - 8 }, true);
+    setBodyPosition(carrierRightWall, { x: x + 75, y: currentY - 6 }, true);
   };
 
   const dispensedBalls = new Set<number>();
-  /** キャリア上・待機床で運搬待ちのボール。update のたびに作り直す */
   const heldBallIds = new Set<number>();
+  const aligningBalls = new Map<number, AligningState>();
+
+  const restoreMask = (ball: Matter.Body, alignState: AligningState): void => {
+    if (ball.collisionFilter && ball.collisionFilter.mask === 0) {
+      ball.collisionFilter.mask = alignState.originalMask;
+    }
+  };
 
   return {
     bodies,
@@ -142,10 +127,6 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
       const allBodies = Matter.Composite.allBodies(engine.world);
       const balls = allBodies.filter((b) => b.label === "ball");
 
-      // waiting_bottom (carrier が底で待機中) の間だけ、判定範囲を待機用固定床
-      // (bottomY+60 付近) まで広げる。moving_up 以降にこの範囲を広げたままだと、
-      // carrier が不在の間に待機床へ新しく到着したボールまで「carrier 内」と
-      // 誤認識し、carrierBase との物理的な接触なしに持ち上げ速度を与えてしまう。
       const carrierRangeBottom =
         state === "waiting_bottom" ? currentY + 90 : currentY + 44;
       const ballsInCarrier = balls.filter((b) => {
@@ -156,14 +137,6 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
         );
       });
 
-      // 運搬待ちのボールを記録しておく。呼び出し側はこれを見て、
-      // 待機中のボールを押し出し(nudge)や停滞検知の対象から外す。
-      //
-      // carrier 上のボール (ballsInCarrier) だけでは足りない。carrier が上昇・
-      // 下降している間は判定範囲が currentY 付近に限定されるため、その間に
-      // 固定待機床へ到着した後続ボールが漏れる。漏れると「正常に待っている
-      // だけ」のボールが 1.2 秒後に押し出され、待機床から弾き出されて落下・
-      // 回収を誘発する。carrier の位置に関係なく、待機床の上も常に見る。
       heldBallIds.clear();
       const rememberHeld = (b: Matter.Body): void => {
         const id = (b.plugin as { ballData?: { id: number } })?.ballData?.id;
@@ -189,28 +162,107 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
         case "waiting_bottom": {
           updatePositions(bottomY);
 
-          // 待機床の上に降り積もったボールを carrierBase 上へ引き上げる。
-          // carrierBase との間に意図的に空けた隙間 (直接の物理的接触が無い)
-          // を自力で転がり越えることは期待できないため、ここで直接引き上げる
-          // (launcher / branchGate と同じ「検知して直接書き換える」手法)。
-          for (const ball of ballsInCarrier) {
-            if (ball.position.y > currentY + 44) {
-              Matter.Body.setPosition(ball, { x: ball.position.x, y: currentY + 10 });
-              Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+          const seenAligningIds = new Set<number>();
+
+          for (const ball of balls) {
+            const ballId = (ball.plugin as { ballData?: { id: number } })?.ballData?.id;
+            if (!ballId) continue;
+
+            const onWaitingFloorOrCarrier =
+              Math.abs(ball.position.x - x) < 80 &&
+              ball.position.y >= currentY - 45 &&
+              ball.position.y <= currentY + 90;
+
+            if (onWaitingFloorOrCarrier) {
+              const targetY = currentY + 10;
+              if (ball.position.y > targetY) {
+                seenAligningIds.add(ballId);
+                if (!aligningBalls.has(ballId)) {
+                  const origMask = ball.collisionFilter?.mask ?? 0xffffffff;
+                  aligningBalls.set(ballId, { alignSteps: 0, originalMask: origMask });
+                }
+
+                const alignState = aligningBalls.get(ballId)!;
+                alignState.alignSteps += 1;
+
+                if (ball.collisionFilter) {
+                  ball.collisionFilter.mask = 0;
+                }
+
+                const dist = ball.position.y - targetY;
+                const maxStepDist = Math.min(alignState.alignSteps, 4);
+
+                if (dist <= maxStepDist || alignState.alignSteps >= 40) {
+                  restoreMask(ball, alignState);
+                  Matter.Body.setPosition(ball, { x: ball.position.x, y: targetY });
+                  Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+                  aligningBalls.delete(ballId);
+                } else {
+                  Matter.Body.setPosition(ball, {
+                    x: ball.position.x,
+                    y: ball.position.y - maxStepDist,
+                  });
+                  Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+                }
+              } else if (aligningBalls.has(ballId)) {
+                const alignState = aligningBalls.get(ballId)!;
+                restoreMask(ball, alignState);
+                aligningBalls.delete(ballId);
+              }
             }
           }
 
-          if (ballsInCarrier.length > 0) {
+          for (const [id, alignState] of aligningBalls.entries()) {
+            if (!seenAligningIds.has(id)) {
+              const b = balls.find(
+                (ball) =>
+                  (ball.plugin as { ballData?: { id: number } })?.ballData?.id === id
+              );
+              if (b) {
+                restoreMask(b, alignState);
+              }
+              aligningBalls.delete(id);
+            }
+          }
+
+          // 発車条件: キャリア受取位置 (y <= currentY + 10) にボールが存在し、
+          // かつ待機床からの引き込み整列中のボール (aligningBalls) が残っていないこと
+          const readyBallsInCarrier = balls.filter(
+            (b) =>
+              Math.abs(b.position.x - x) < 80 &&
+              b.position.y >= currentY - 45 &&
+              b.position.y <= currentY + 10
+          );
+
+          if (readyBallsInCarrier.length > 0 && aligningBalls.size === 0) {
             state = "moving_up";
           }
           break;
         }
         case "moving_up": {
+          // moving_up へ遷移した時点で整列中ボールが残っていたら、安全のため衝突マスクを復元・初期化
+          if (aligningBalls.size > 0) {
+            for (const [id, alignState] of aligningBalls.entries()) {
+              const b = balls.find(
+                (ball) =>
+                  (ball.plugin as { ballData?: { id: number } })?.ballData?.id === id
+              );
+              if (b) {
+                restoreMask(b, alignState);
+              }
+            }
+            aligningBalls.clear();
+          }
+
           const nextY = Math.max(topY, currentY - speed * deltaSec);
           updatePositions(nextY);
 
           for (const ball of ballsInCarrier) {
             Matter.Body.setVelocity(ball, { x: 0, y: -speed / 60 });
+            Matter.Body.setPosition(ball, {
+              x: ball.position.x,
+              y: Math.min(ball.position.y, currentY + 10),
+            });
           }
 
           if (currentY <= topY) {
@@ -224,7 +276,9 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
           updatePositions(topY);
 
           for (const ball of ballsInCarrier) {
-            Matter.Body.setVelocity(ball, { x: 8, y: -2 });
+            const currentVx = ball.velocity.x;
+            const nextVx = Math.min(8.0, currentVx + 2.0);
+            Matter.Body.setVelocity(ball, { x: nextVx, y: -2 });
 
             const ballId = (ball.plugin as { ballData?: { id: number } })?.ballData?.id;
             if (ballId && !dispensedBalls.has(ballId)) {
@@ -251,9 +305,7 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
       }
     },
     reset(): void {
-      // 状態機械を生成直後 (底で待機中) に戻し、キャリアの位置も即座に反映する。
-      // updatePositions を呼ばないと、次の update() が呼ばれるまで carrier が
-      // 前回の高さのまま表示され続けてしまう。
+      aligningBalls.clear();
       state = "waiting_bottom";
       stateTimer = 0;
       dispensedBalls.clear();
