@@ -108,8 +108,15 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color: "transparent" },
   });
 
-  // ホッパー床 (x=395..515, 角度 -0.20, 摩擦 0.05)
-  const hopperFloor = Matter.Bodies.rectangle(455, 706, 120, 12, {
+  // ホッパー床。キャリアの掃引範囲 (x-77..x+82) の外に置く。
+  // 座標は x / bottomY からの相対で決める（固定値にすると、既定以外の配置を
+  // 渡したときにキャリアだけが移動してホッパーが取り残される）。
+  const hopperCenterX = x + 155;
+  const hopperCenterY = bottomY - 34;
+  const gatePivotX = x + 93;
+  const gatePivotY = bottomY - 87;
+  const gateHalfLen = 26;
+  const hopperFloor = Matter.Bodies.rectangle(hopperCenterX, hopperCenterY, 120, 12, {
     isStatic: true,
     angle: -0.2,
     friction: 0.05,
@@ -117,15 +124,15 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
     plugin: { color, material: "wood", moving: false },
   });
 
-  // ゲート (支点 393, 653、長さ 52、厚み 8)
-  const gate = Matter.Bodies.rectangle(393, 679, 8, 52, {
+  // ゲート（支点は gatePivotX / gatePivotY、長さ 52、厚み 8）
+  const gate = Matter.Bodies.rectangle(gatePivotX, gatePivotY + gateHalfLen, 8, 52, {
     isStatic: true,
     label: "elevator_gate",
     plugin: { color: STEEL_COLOR, material: "metal", moving: true },
   });
 
-  // 出口シュート ((398, 706) -> (345, 722), 中心 (371.5, 720), 長さ 56, 角度 -0.28)
-  const exitChute = Matter.Bodies.rectangle(371.5, 720, 56, 12, {
+  // 出口シュート。ホッパーから受け皿へ導く。右壁の上端より上を通る高さに置く。
+  const exitChute = Matter.Bodies.rectangle(x + 71.5, bottomY - 20, 56, 12, {
     isStatic: true,
     angle: -0.28,
     label: "elevator_exit_chute",
@@ -153,9 +160,9 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
 
   const updateGate = (isOpen: boolean): void => {
     const angle = isOpen ? -1.5708 : 0;
-    const pivotX = 393;
-    const pivotY = 653;
-    const halfLen = 26;
+    const pivotX = gatePivotX;
+    const pivotY = gatePivotY;
+    const halfLen = gateHalfLen;
     const cx = pivotX + halfLen * Math.sin(angle);
     const cy = pivotY + halfLen * Math.cos(angle);
     setBodyPosition(gate, { x: cx, y: cy }, true);
@@ -219,10 +226,10 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
         // ホッパーで順番待ちしているボールは「回収されては困る」が「押し出しは要る」。
         // 固着したまま押し出しも効かないと待機列が流れず、エレベーターの周回が落ちる。
         const onHopper =
-          b.position.x >= 380 &&
-          b.position.x <= 525 &&
-          b.position.y >= 640 &&
-          b.position.y <= 735;
+          b.position.x >= x + 80 &&
+          b.position.x <= x + 225 &&
+          b.position.y >= bottomY - 100 &&
+          b.position.y <= bottomY - 5;
         if (onWaitingFloor) {
           rememberHeld(b, true);
         } else if (onHopper) {
