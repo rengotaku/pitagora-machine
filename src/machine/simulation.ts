@@ -222,18 +222,6 @@ export function startSimulation(
     plugin: { color: BIRCH_SHADOW_COLOR, material: "wood", moving: false },
   });
 
-  // 坂 2 からエレベーターへの接続シュート (左463, 694 -> 左287, 730)
-  // ボールがエレベーターの受け皿を飛び越えないよう、勾配を緩め坂2本体より摩擦を上げて減速させる
-  const ramp2ToElevatorChute = createRamp({
-    x: 375.3,
-    y: 711.6,
-    length: 180,
-    angle: -0.2,
-    friction: 0.05,
-    hasGuard: true,
-    label: "chute2",
-  });
-
   // 床脱落防止ガード（エレベーター周り）
   // エレベーター受け皿左壁 (x=230) の外側に配置し、飛び越えたボールを最終的に受け止める
   const elevatorCatchFence = Matter.Bodies.rectangle(205, 735, 12, 150, {
@@ -346,7 +334,6 @@ export function startSimulation(
     ...launcher.bodies,
     ...ramp2.bodies,
     catcherBackWall,
-    ...ramp2ToElevatorChute.bodies,
     elevatorCatchFence,
     ...elevator.bodies,
     ...elevatorToRamp1Guide.bodies,
@@ -651,8 +638,12 @@ export function startSimulation(
     // エレベーターで運搬待ちのボールは「動いていない」が詰まってはいない。
     // 押し出すと待機床から弾き出して落下・回収を誘発するため、判定から外す。
     // タイマーも消しておかないと、待機を抜けた直後に押されてしまう。
+    // 除外するのは「キャリアに載っている / 待機床にある」ボールだけ。ホッパーで
+    // 順番待ちしているボールは押し出しの対象に残す。ここも外すと、ホッパー上で
+    // 固着したボールを動かす手段が無くなり、待機列が流れずエレベーターの周回が
+    // 落ちる（実測で 25 → 7）。回収されないことは isHolding 側で担保している。
     const nudgeSamples: NudgeSample[] = samples.filter((s) => {
-      if (elevator.isHolding(s.id)) {
+      if (elevator.isCarried(s.id)) {
         nudgeTracker.forget(s.id);
         return false;
       }

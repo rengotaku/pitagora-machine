@@ -7,8 +7,8 @@ import { createElevator } from "./elevator";
 describe("elevator", () => {
   it("createElevator でエレベーターパーツが生成される", () => {
     const elevator = createElevator({
-      bottomY: 760,
-      topY: 130,
+      bottomY: 740,
+      topY: 120,
       x: 300,
     });
     expect(elevator.bodies.length).toBeGreaterThanOrEqual(4);
@@ -17,14 +17,14 @@ describe("elevator", () => {
   });
 
   it("reset() でキャリアが底の待機位置に戻り、運搬待ち記録も破棄される (レビュー指摘 #2 回帰テスト)", () => {
-    const bottomY = 760;
-    const topY = 130;
+    const bottomY = 740;
+    const topY = 120;
     const x = 300;
     const elevator = createElevator({ bottomY, topY, x, speed: 300 });
     const engine = Matter.Engine.create();
     Matter.Composite.add(engine.world, elevator.bodies);
 
-    // bodies = [rail, carrierBase, carrierLeftWall, carrierRightWall, waitingFloor, sensor]
+    // bodies = [rail, carrierBase, carrierLeftWall, carrierRightWall, waitingFloor, sensor, ...]
     const carrierBase = elevator.bodies[1];
     expect(carrierBase.label).toBe("elevator_carrier");
     expect(carrierBase.position.y).toBeCloseTo(bottomY + 24, 3);
@@ -34,7 +34,9 @@ describe("elevator", () => {
     Matter.Body.setVelocity(ball, { x: 0, y: 0 });
     Matter.Composite.add(engine.world, ball);
 
-    elevator.update(engine, 16.666); // waiting_bottom: ball を検知して moving_up へ
+    // まとめ積みの待ち時間 (450ms) を過ぎてから発車するので、検知だけでは上昇しない
+    elevator.update(engine, 16.666); // waiting_bottom: ball を検知（待ち時間の計測開始）
+    elevator.update(engine, 500); // waiting_bottom: 待ち時間を超えて moving_up へ
     elevator.update(engine, 500); // moving_up: currentY が上昇する
 
     expect(carrierBase.position.y).toBeLessThan(bottomY + 24 - 50);
@@ -54,10 +56,8 @@ describe("elevator", () => {
   });
 
   it("A-4. キャリアをキネマティック駆動する", () => {
-    // 理由: 素の setPosition では velocity が 0 のままで、衝突解決が相対速度を読めず
-    // めり込み解消でボールが弾かれるのを防ぐ。
-    const bottomY = 760;
-    const topY = 130;
+    const bottomY = 740;
+    const topY = 120;
     const x = 300;
     const elevator = createElevator({ bottomY, topY, x, speed: 300 });
     const engine = Matter.Engine.create();
@@ -67,7 +67,9 @@ describe("elevator", () => {
     Matter.Body.setVelocity(ball, { x: 0, y: 0 });
     Matter.Composite.add(engine.world, ball);
 
-    elevator.update(engine, 16.666); // waiting_bottom -> moving_up へ遷移
+    // まとめ積みの待ち時間 (450ms) を過ぎてから発車する
+    elevator.update(engine, 16.666); // waiting_bottom: ball を検知（待ち時間の計測開始）
+    elevator.update(engine, 500); // waiting_bottom -> moving_up へ遷移
     elevator.update(engine, 16.666); // moving_up で上方向へ位置・速度更新
 
     const carrierBase = elevator.bodies[1];
@@ -75,10 +77,8 @@ describe("elevator", () => {
   });
 
   it("A-5. 払い出しの初速が 1 ステップで最大値にならない", () => {
-    // 理由: 1 ステップで 8 に飛ぶと画面上で 18px の跳びになる (実測 33 件/分) のを防ぐため
-    // 数ステップかけて徐々に立ち上げる。
-    const bottomY = 760;
-    const topY = 130;
+    const bottomY = 740;
+    const topY = 120;
     const x = 300;
     const elevator = createElevator({ bottomY, topY, x, speed: 300 });
     const engine = Matter.Engine.create();
@@ -88,122 +88,156 @@ describe("elevator", () => {
     Matter.Body.setVelocity(ball, { x: 0, y: 0 });
     Matter.Composite.add(engine.world, ball);
 
-    // 最上部 (topY=130) 到達まで update を回す
     for (let i = 0; i < 200; i += 1) {
+      Matter.Engine.update(engine, 16.666);
       elevator.update(engine, 16.666);
-      if (ball.velocity.x > 0) break; // dispensing に入って速度が付与されたら抜ける
+      if (ball.velocity.x > 0) break;
     }
 
-    // dispensing に入った最初の 1 ステップ目
     const firstVx = ball.velocity.x;
     expect(firstVx).toBeGreaterThan(0);
     expect(firstVx).toBeLessThan(8.0);
 
-    // さらに数ステップ進めると最大値 8.0 に達する
     for (let i = 0; i < 5; i += 1) {
+      Matter.Engine.update(engine, 16.666);
       elevator.update(engine, 16.666);
     }
     expect(ball.velocity.x).toBeCloseTo(8.0, 3);
   });
 
-  it("B-1. 待機中のボールを 1 フレームで大きく移動させない", () => {
-    // 理由: 待機床からキャリア内へ一括で 44px ワープさせる問題の回帰テスト。
-    const bottomY = 760;
-    const topY = 130;
+  it("ゲートの開閉時にホッパー床との隙間条件 (開: 45px以上, 閉: 15px以下) を満たす", () => {
+    const elevator = createElevator({ bottomY: 740, topY: 120, x: 300 });
+    const engine = Matter.Engine.create();
+    Matter.Composite.add(engine.world, elevator.bodies);
+
+    const hopperFloor = elevator.bodies.find((b) => b.label === "elevator_hopper_floor")!;
+    const gate = elevator.bodies.find((b) => b.label === "elevator_gate")!;
+
+    const getMinDistanceToHopperFloor = (): number => {
+      const floorAngle = hopperFloor.angle;
+      const nx = Math.sin(floorAngle);
+      const ny = -Math.cos(floorAngle);
+      const px = hopperFloor.position.x + 6 * nx;
+      const py = hopperFloor.position.y + 6 * ny;
+
+      let minDist = Infinity;
+      for (const v of gate.vertices) {
+        const dist = (v.x - px) * nx + (v.y - py) * ny;
+        if (dist < minDist) minDist = dist;
+      }
+      return minDist;
+    };
+
+    // 閉じた状態 (reset後)
+    elevator.reset();
+    const closedDist = getMinDistanceToHopperFloor();
+    expect(closedDist).toBeLessThanOrEqual(15);
+
+    // 開いた状態 (waiting_bottom での update)
+    elevator.update(engine, 16.666);
+    const openDist = getMinDistanceToHopperFloor();
+    expect(openDist).toBeGreaterThanOrEqual(45);
+  });
+
+  it("出口シュートの面が x 368..382 の範囲で、キャリア右壁の上端より上にある", () => {
+    const bottomY = 740;
+    const elevator = createElevator({ bottomY, topY: 120, x: 300 });
+
+    const carrierRightWall = elevator.bodies[3]; // rectangle(x + 75, currentY + 12, 14, 44)
+    const exitChute = elevator.bodies.find((b) => b.label === "elevator_exit_chute")!;
+
+    // 停車時の右壁上端 y: currentY = 740, 中心 y = 752, 高さ 44 -> 上端 y = 730
+    const rightWallTopY = carrierRightWall.position.y - 22; // 730
+
+    // 出口シュートの上面 y(x) の評価
+    const chuteAngle = exitChute.angle;
+    const nx = Math.sin(chuteAngle);
+    const ny = -Math.cos(chuteAngle);
+    const px = exitChute.position.x + 6 * nx;
+    const py = exitChute.position.y + 6 * ny;
+
+    for (let x = 368; x <= 382; x += 1) {
+      const chuteSurfaceY = py - ((x - px) * nx) / ny;
+      // y 座標は画面上方向ほど小さい。シュート面 y < 右壁上端 y
+      expect(chuteSurfaceY).toBeLessThan(rightWallTopY);
+    }
+  });
+
+  it("1 周ぶん update を回し、位置の変化量が 10px を超えず collisionFilter.mask が 0 になる瞬間が無い", () => {
+    const bottomY = 740;
+    const topY = 120;
     const x = 300;
     const elevator = createElevator({ bottomY, topY, x, speed: 300 });
     const engine = Matter.Engine.create();
     Matter.Composite.add(engine.world, elevator.bodies);
 
-    // キャリアを上昇させるためにボール 1 を置き、moving_up へ遷移させる
-    const ball1 = createBall(createRng(1), x, bottomY + 10);
-    Matter.Composite.add(engine.world, ball1);
-    elevator.update(engine, 16.666);
+    // ホッパー床上付近 (450, 680) にボールを配置
+    const ball = createBall(createRng(1), 450, 680);
+    Matter.Composite.add(engine.world, ball);
 
-    // キャリアが上昇中の待機位置 (bottomY + 54 = 814px 付近) にボール 2 を置く
-    const ball2 = createBall(createRng(2), x, bottomY + 54);
-    Matter.Composite.add(engine.world, ball2);
-
-    // キャリアが最上部まで行って底に戻るまで追跡
-    let prevY = ball2.position.y;
+    let prevPos = { ...ball.position };
     let maxStepDist = 0;
 
     for (let i = 0; i < 300; i += 1) {
+      Matter.Engine.update(engine, 16.666);
       elevator.update(engine, 16.666);
-      const dy = Math.abs(ball2.position.y - prevY);
-      if (dy > maxStepDist) {
-        maxStepDist = dy;
+
+      const dist = Math.hypot(ball.position.x - prevPos.x, ball.position.y - prevPos.y);
+      if (dist > maxStepDist) {
+        maxStepDist = dist;
       }
-      prevY = ball2.position.y;
+      prevPos = { ...ball.position };
+
+      expect(ball.collisionFilter.mask).not.toBe(0);
     }
 
-    // どの 1 ステップでも位置の変化量が 10px を超えないこと
     expect(maxStepDist).toBeLessThanOrEqual(10.0);
   });
 
-  it("B-2 代替. 整列中は衝突が無効化され、完了時に元に戻る", () => {
-    // 理由: 待機床からキャリアへの引き込み中に衝突反発が起きないよう mask=0 にし、完了後元に戻す。
-    const bottomY = 760;
-    const topY = 130;
-    const x = 300;
-    const elevator = createElevator({ bottomY, topY, x, speed: 300 });
-    const engine = Matter.Engine.create();
-    Matter.Composite.add(engine.world, elevator.bodies);
-
-    // 待機床上の位置 (bottomY + 50) にボールを置く
-    const ball = createBall(createRng(3), x, bottomY + 50);
-    const initialMask = ball.collisionFilter.mask;
-    expect(initialMask).not.toBe(0);
-    Matter.Composite.add(engine.world, ball);
-
-    // 1 回目の update (引き込み整列中)
-    elevator.update(engine, 16.666);
-    expect(ball.collisionFilter.mask).toBe(0);
-
-    // 整列完了 (y <= bottomY + 10) まで進める
-    for (let i = 0; i < 50; i += 1) {
-      elevator.update(engine, 16.666);
-      if (ball.position.y <= bottomY + 10.001) {
-        break;
-      }
-    }
-
-    // 整列完了後は元の衝突マスクに復元され、目標位置 y = bottomY + 10 に達していること
-    expect(ball.collisionFilter.mask).toBe(initialMask);
-    expect(ball.position.y).toBeCloseTo(bottomY + 10, 3);
+  it("ホッパー床の勾配が十分にある (絶対値 0.15 以上)", () => {
+    const elevator = createElevator({ bottomY: 740, topY: 120, x: 300 });
+    const hopperFloor = elevator.bodies.find((b) => b.label === "elevator_hopper_floor")!;
+    expect(Math.abs(hopperFloor.angle)).toBeGreaterThanOrEqual(0.15);
   });
 
-  it("整列中のボールを残したままキャリアが発車しない (P1 レビュー指摘対応)", () => {
-    // 理由: 待機床に複数ボールがある際、整列途中 (mask=0) のボールを取り残して発車し、
-    // すり抜け脱落が発生するバグを防ぐ。
-    const bottomY = 760;
-    const topY = 130;
-    const x = 300;
-    const elevator = createElevator({ bottomY, topY, x, speed: 300 });
+  it("実エンジンでホッパー上のボールがゲートまで転がる", () => {
+    const elevator = createElevator({ bottomY: 740, topY: 120, x: 300 });
     const engine = Matter.Engine.create();
     Matter.Composite.add(engine.world, elevator.bodies);
 
-    // ボール1: キャリア受け取り位置 (整列完了位置)
-    const ball1 = createBall(createRng(1), x, bottomY + 10);
-    const initialMask1 = ball1.collisionFilter.mask;
-    Matter.Composite.add(engine.world, ball1);
+    // ホッパー床の右寄り (460, 680) に静止状態でボールを配置
+    const ball = createBall(createRng(1), 460, 680);
+    Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+    Matter.Composite.add(engine.world, ball);
 
-    // ボール2: 離れた待機床上 (整列中)
-    const ball2 = createBall(createRng(2), x, bottomY + 50);
-    const initialMask2 = ball2.collisionFilter.mask;
-    Matter.Composite.add(engine.world, ball2);
+    const startX = ball.position.x;
 
-    const carrierBase = elevator.bodies[1];
-
-    for (let i = 0; i < 50; i += 1) {
+    // 物理シミュレーションを 80 ステップ進める
+    for (let i = 0; i < 80; i += 1) {
+      Matter.Engine.update(engine, 16.666);
       elevator.update(engine, 16.666);
+    }
 
-      // キャリアが上昇を開始した時点 (moving_up)
-      if (carrierBase.position.y < bottomY + 24 - 1.0) {
-        expect(ball1.collisionFilter.mask).toBe(initialMask1);
-        expect(ball2.collisionFilter.mask).toBe(initialMask2);
-        break;
-      }
+    // ボールの x 座標がゲート側 (左) へ有意に移動していること
+    expect(ball.position.x).toBeLessThan(startX - 15);
+  });
+
+  it("ホッパーで待つボールが運搬待ち (isHolding) として報告される", () => {
+    const elevator = createElevator({ bottomY: 740, topY: 120, x: 300 });
+    const engine = Matter.Engine.create();
+    Matter.Composite.add(engine.world, elevator.bodies);
+
+    // ホッパー床の上 (x=450, y=680) にボールを配置
+    const ball = createBall(createRng(1), 450, 680);
+    Matter.Composite.add(engine.world, ball);
+
+    // 1 回 update を呼ぶ
+    elevator.update(engine, 16.666);
+
+    const ballId = (ball.plugin as { ballData?: { id: number } })?.ballData?.id;
+    expect(ballId).toBeDefined();
+    if (ballId !== undefined) {
+      expect(elevator.isHolding(ballId)).toBe(true);
     }
   });
 });
