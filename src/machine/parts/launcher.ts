@@ -188,7 +188,8 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
 
           if (!state.launched) {
             state.approachElapsedMs += deltaMs;
-            const isMovingRight = ball.velocity.x >= 0;
+            // 引き込み (整列) 開始条件: 水平速度が正 (右向き)、または接近タイムアウト、または reset 直後
+            const isMovingRight = ball.velocity.x > 0;
             const isApproachTimeout =
               state.approachElapsedMs >= LAUNCH_APPROACH_TIMEOUT_MS;
 

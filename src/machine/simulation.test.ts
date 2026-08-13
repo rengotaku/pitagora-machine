@@ -221,4 +221,31 @@ describe("simulation", () => {
 
     sim.stop();
   });
+
+  it("回収されたボールの軌跡エントリが残らない (P2 レビュー指摘対応)", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1600;
+    canvas.height = 900;
+    const ctx = createMockCtx2D();
+
+    const sim = startSimulation(canvas, ctx, {
+      seed: 1000,
+      debugEnabled: true,
+      maxActiveBalls: 1,
+    });
+    sim.step?.(16.666);
+
+    const firstBallId = window.__pitagora?.trailIds?.[0];
+    expect(firstBallId).toBeDefined();
+    expect(window.__pitagora?.trailIds).toContain(firstBallId);
+
+    // setMaxActiveBalls(0) で既存のボールをすべて回収
+    sim.setMaxActiveBalls(0);
+    sim.step?.(16.666);
+
+    // 回収されたボール (firstBallId) の軌跡エントリが残っていないこと
+    expect(window.__pitagora?.trailIds).not.toContain(firstBallId);
+
+    sim.stop();
+  });
 });

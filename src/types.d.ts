@@ -21,6 +21,7 @@ export interface PitagoraStats {
   elapsedMs: number;
   recoveredBalls: number;
   outOfBoundsBalls: number;
+  trailIds?: number[];
   gimmicks: GimmickStats;
 }
 

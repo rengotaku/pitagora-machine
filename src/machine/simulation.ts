@@ -485,6 +485,7 @@ export function startSimulation(
         elapsedMs,
         recoveredBalls,
         outOfBoundsBalls,
+        trailIds: Array.from(trailTracker.getAllTrails().keys()),
         gimmicks: { ...gimmicks },
       };
     }
@@ -719,7 +720,10 @@ export function startSimulation(
     }
 
     if (debugEnabled) {
-      for (const ball of currentBalls) {
+      const activeBallsNow = Matter.Composite.allBodies(engine.world).filter(
+        (b) => b.label === "ball"
+      );
+      for (const ball of activeBallsNow) {
         const data = getBallData(ball);
         if (data) {
           trailTracker.addPoint(data.id, ball.position);
