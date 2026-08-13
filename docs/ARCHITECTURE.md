@@ -12,7 +12,7 @@ index.html
       ├ src/machine/simulation.ts   ループの中心。ここが装置の配線を持つ
       │   ├ src/machine/world.ts        Matter.js の Engine と外周
       │   ├ src/machine/ball.ts         ボール生成
-      │   └ src/machine/parts/*.ts      仕掛け（13 種類）
+      │   └ src/machine/parts/*.ts      仕掛け（14 種類）
       ├ src/render/renderer.ts      Canvas 2D への自前描画
       ├ src/panel/settings-panel.ts 設定パネル（通常時は非表示）
       └ src/lib/*.ts                分岐を持つ純粋ロジック（テスト対象）
@@ -80,10 +80,10 @@ requestAnimationFrame
 
 ```
 投入口 → 坂1 → 分岐ゲート → 振り子 → ドミノ → シーソー
-      → 発射装置 → 坂2 → 回転ホイール → バウンド床 → 下部振り子 → エレベーター → 投入口へ戻る
+      → 発射装置 → 坂2 → 上部振り子 → 回転ホイール → バウンド床 → 下部振り子 → エレベーター → 投入口へ戻る
 ```
 
-仕掛けは 13 種類。`window.__pitagora.gimmicks` に各仕掛けの通過回数が出るので、「置いてあるだけで一度も作動しない仕掛け」を数値で検出できる。
+仕掛けは 14 種類。`window.__pitagora.gimmicks` に各仕掛けの通過回数が出るので、「置いてあるだけで一度も作動しない仕掛け」を数値で検出できる。
 
 ## 統計（`window.__pitagora`）
 
