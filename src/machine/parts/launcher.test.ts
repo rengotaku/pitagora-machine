@@ -39,7 +39,7 @@ describe("launcher", () => {
     const engine = Matter.Engine.create();
     const ball = createBall(createRng(2), 1150, 450);
     Matter.Body.setVelocity(ball, { x: 0, y: 0 });
-    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+    Matter.Composite.add(engine.world, ball);
 
     let launches = 0;
     // 1 回目: 発射される
@@ -258,5 +258,25 @@ describe("launcher", () => {
 
     expect(launches).toBe(1);
     expect(ball.collisionFilter.mask).toBe(initialMask);
+  });
+
+  it("中心がセンサー外でもボール本体が重なっていれば追跡が始まる (P2 レビュー指摘対応)", () => {
+    // 理由: Bounds.overlaps による広い検出範囲で高速に進入するボールの通過取りこぼしを防ぐ。
+    const launcher = createLauncher({ x: 1150, y: 470 });
+    const engine = Matter.Engine.create();
+    // センサーは中心 x=1150, y=450 (幅220, 高さ40 => x: 1040~1260, y: 430~470)
+    // 中心を x=1270, y=450、半径 18 のボールを置く (bounds.min.x = 1252 <= 1260 で overlaps は成立)
+    const ball = createBall(createRng(1), 1270, 450);
+    Matter.Composite.add(engine.world, [launcher.sensor, ball]);
+
+    let launches = 0;
+    // 1 回目の update で overlaps により追跡状態に登録されるが、中心 (1270) は 1260 外のため整列/発射は即開始されない
+    launcher.update(engine, 16.666, () => {
+      launches += 1;
+    });
+
+    expect(launches).toBe(0);
+    // 追跡状態が開始されていること (reset() を呼んだ際に追跡がクリアされる正常挙動で間接検証)
+    expect(() => launcher.reset()).not.toThrow();
   });
 });

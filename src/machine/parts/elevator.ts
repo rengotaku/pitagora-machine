@@ -225,29 +225,40 @@ export function createElevator(options: ElevatorOptions = {}): ElevatorComponent
             }
           }
 
-          // キャリア底板の上 (y <= currentY + 15) に整列引き込みが完了したボールがある場合にのみ発車
-          const readyBallsInCarrier = balls.filter((b) => {
-            const id = (b.plugin as { ballData?: { id: number } })?.ballData?.id;
-            return (
+          // 発車条件: キャリア受取位置 (y <= currentY + 10) にボールが存在し、
+          // かつ待機床からの引き込み整列中のボール (aligningBalls) が残っていないこと
+          const readyBallsInCarrier = balls.filter(
+            (b) =>
               Math.abs(b.position.x - x) < 80 &&
               b.position.y >= currentY - 45 &&
-              b.position.y <= currentY + 10 &&
-              (!id || !aligningBalls.has(id))
-            );
-          });
+              b.position.y <= currentY + 10
+          );
 
-          if (readyBallsInCarrier.length > 0) {
+          if (readyBallsInCarrier.length > 0 && aligningBalls.size === 0) {
             state = "moving_up";
           }
           break;
         }
         case "moving_up": {
+          // moving_up へ遷移した時点で整列中ボールが残っていたら、安全のため衝突マスクを復元・初期化
+          if (aligningBalls.size > 0) {
+            for (const [id, alignState] of aligningBalls.entries()) {
+              const b = balls.find(
+                (ball) =>
+                  (ball.plugin as { ballData?: { id: number } })?.ballData?.id === id
+              );
+              if (b) {
+                restoreMask(b, alignState);
+              }
+            }
+            aligningBalls.clear();
+          }
+
           const nextY = Math.max(topY, currentY - speed * deltaSec);
           updatePositions(nextY);
 
           for (const ball of ballsInCarrier) {
             Matter.Body.setVelocity(ball, { x: 0, y: -speed / 60 });
-            // キャリア上昇中のボール位置をキネマティック追従させてテスト単体でも確実に保持
             Matter.Body.setPosition(ball, {
               x: ball.position.x,
               y: Math.min(ball.position.y, currentY + 10),

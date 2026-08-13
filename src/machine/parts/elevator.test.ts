@@ -163,7 +163,6 @@ describe("elevator", () => {
     // 整列完了 (y <= bottomY + 10) まで進める
     for (let i = 0; i < 50; i += 1) {
       elevator.update(engine, 16.666);
-
       if (ball.position.y <= bottomY + 10.001) {
         break;
       }
@@ -172,5 +171,39 @@ describe("elevator", () => {
     // 整列完了後は元の衝突マスクに復元され、目標位置 y = bottomY + 10 に達していること
     expect(ball.collisionFilter.mask).toBe(initialMask);
     expect(ball.position.y).toBeCloseTo(bottomY + 10, 3);
+  });
+
+  it("整列中のボールを残したままキャリアが発車しない (P1 レビュー指摘対応)", () => {
+    // 理由: 待機床に複数ボールがある際、整列途中 (mask=0) のボールを取り残して発車し、
+    // すり抜け脱落が発生するバグを防ぐ。
+    const bottomY = 760;
+    const topY = 130;
+    const x = 300;
+    const elevator = createElevator({ bottomY, topY, x, speed: 300 });
+    const engine = Matter.Engine.create();
+    Matter.Composite.add(engine.world, elevator.bodies);
+
+    // ボール1: キャリア受け取り位置 (整列完了位置)
+    const ball1 = createBall(createRng(1), x, bottomY + 10);
+    const initialMask1 = ball1.collisionFilter.mask;
+    Matter.Composite.add(engine.world, ball1);
+
+    // ボール2: 離れた待機床上 (整列中)
+    const ball2 = createBall(createRng(2), x, bottomY + 50);
+    const initialMask2 = ball2.collisionFilter.mask;
+    Matter.Composite.add(engine.world, ball2);
+
+    const carrierBase = elevator.bodies[1];
+
+    for (let i = 0; i < 50; i += 1) {
+      elevator.update(engine, 16.666);
+
+      // キャリアが上昇を開始した時点 (moving_up)
+      if (carrierBase.position.y < bottomY + 24 - 1.0) {
+        expect(ball1.collisionFilter.mask).toBe(initialMask1);
+        expect(ball2.collisionFilter.mask).toBe(initialMask2);
+        break;
+      }
+    }
   });
 });

@@ -37,6 +37,12 @@ export interface LauncherPart {
  */
 const LAUNCH_TIMEOUT_MS = 1500;
 
+/**
+ * センサー侵入後、整列開始条件 (中心がセンサー内) に至るのを待つ上限時間 (ms)。
+ * 万一発射台の上で引っかかった場合の詰まり防止保護。
+ */
+const LAUNCH_APPROACH_TIMEOUT_MS = 600;
+
 /** 最大整列ステップ数 (詰まり防止保護: 2秒 = 120ステップ) */
 const MAX_ALIGN_STEPS = 120;
 
@@ -49,8 +55,10 @@ const LANDING_BOOST_MIN_ELAPSED_MS = 300;
 
 interface LaunchState {
   elapsedMs: number;
+  approachElapsedMs: number;
   alignSteps: number;
   originalMask: number;
+  aligning: boolean;
   boosted: boolean;
   launched: boolean;
 }
@@ -110,6 +118,12 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
   const launchedBalls = new Map<number, LaunchState>();
   let wasReset = false;
 
+  const restoreMask = (ball: Matter.Body, state: LaunchState): void => {
+    if (ball.collisionFilter && ball.collisionFilter.mask === 0) {
+      ball.collisionFilter.mask = state.originalMask;
+    }
+  };
+
   return {
     bodies: [base, backWall, sensor],
     sensor,
@@ -153,18 +167,18 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
         if (!ballId) continue;
         seenIds.add(ballId);
 
-        // ボール中心がセンサー領域内にあるかを判定 (220 x 40)
-        const inSensor =
-          Math.abs(ball.position.x - x) <= 110 &&
-          Math.abs(ball.position.y - sensorCenterY) <= 20;
+        // 検出範囲 (追跡開始) は元通り Matter.Bounds.overlaps(sensor.bounds, ball.bounds) で広い検出域を確保
+        const inSensor = Matter.Bounds.overlaps(sensor.bounds, ball.bounds);
 
         if (inSensor) {
           if (!launchedBalls.has(ballId)) {
             const origMask = ball.collisionFilter?.mask ?? 0xffffffff;
             launchedBalls.set(ballId, {
               elapsedMs: 0,
+              approachElapsedMs: 0,
               alignSteps: 0,
               originalMask: origMask,
+              aligning: false,
               boosted: false,
               launched: false,
             });
@@ -173,55 +187,64 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
           const state = launchedBalls.get(ballId)!;
 
           if (!state.launched) {
-            // 整列引き込み中は衝突を一時的に無効化し、シュート等との物理干渉を防ぐ
-            if (ball.collisionFilter) {
-              ball.collisionFilter.mask = 0;
+            // 整列開始条件: ボール中心がセンサー内、または接近タイムアウト (600ms)、または reset 直後
+            const isCenterInSensor =
+              Math.abs(ball.position.x - x) <= 110 &&
+              Math.abs(ball.position.y - sensorCenterY) <= 20;
+            const isApproachTimeout =
+              state.approachElapsedMs >= LAUNCH_APPROACH_TIMEOUT_MS;
+
+            if (isCenterInSensor || isApproachTimeout || isResetState) {
+              state.aligning = true;
+            } else {
+              state.approachElapsedMs += deltaMs;
             }
 
-            state.alignSteps += 1;
-            const targetX = x;
-            const targetY = sensorCenterY;
-
-            const dx = targetX - ball.position.x;
-            const dy = targetY - ball.position.y;
-            const dist = Math.hypot(dx, dy);
-
-            // 段階的な最大移動距離 (1px -> 2px -> 3px -> 4px で頭打ち)
-            const maxStepDist = Math.min(state.alignSteps, 4);
-
-            if (
-              dist <= maxStepDist ||
-              state.alignSteps >= MAX_ALIGN_STEPS ||
-              isResetState
-            ) {
-              // 整列完了時またはタイムアウト(120ステップ)時に衝突判定を復元し発射する
+            if (state.aligning) {
               if (ball.collisionFilter) {
-                ball.collisionFilter.mask = state.originalMask;
+                ball.collisionFilter.mask = 0;
               }
-              Matter.Body.setPosition(ball, { x: targetX, y: targetY });
-              Matter.Body.setVelocity(ball, { x: launchVx, y: launchVy });
-              state.launched = true;
-              state.elapsedMs = 0;
-              state.alignSteps = 0;
-              onLaunch?.(ballId);
-            } else {
-              // 毎ステップ最大 4px ずつ発射位置へスムーズに寄せる
-              const ux = dx / dist;
-              const uy = dy / dist;
-              Matter.Body.setPosition(ball, {
-                x: ball.position.x + ux * maxStepDist,
-                y: ball.position.y + uy * maxStepDist,
-              });
-              Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+
+              state.alignSteps += 1;
+              const targetX = x;
+              const targetY = sensorCenterY;
+
+              const dx = targetX - ball.position.x;
+              const dy = targetY - ball.position.y;
+              const dist = Math.hypot(dx, dy);
+
+              const maxStepDist = Math.min(state.alignSteps, 4);
+
+              if (
+                dist <= maxStepDist ||
+                state.alignSteps >= MAX_ALIGN_STEPS ||
+                isResetState
+              ) {
+                restoreMask(ball, state);
+                Matter.Body.setPosition(ball, { x: targetX, y: targetY });
+                Matter.Body.setVelocity(ball, { x: launchVx, y: launchVy });
+                state.launched = true;
+                state.aligning = false;
+                state.elapsedMs = 0;
+                state.alignSteps = 0;
+                onLaunch?.(ballId);
+              } else {
+                const ux = dx / dist;
+                const uy = dy / dist;
+                Matter.Body.setPosition(ball, {
+                  x: ball.position.x + ux * maxStepDist,
+                  y: ball.position.y + uy * maxStepDist,
+                });
+                Matter.Body.setVelocity(ball, { x: 0, y: 0 });
+              }
             }
           } else {
-            if (ball.collisionFilter && ball.collisionFilter.mask === 0) {
-              ball.collisionFilter.mask = state.originalMask;
-            }
+            restoreMask(ball, state);
             state.elapsedMs += deltaMs;
             if (state.elapsedMs >= LAUNCH_TIMEOUT_MS) {
               state.launched = false;
               state.elapsedMs = LAUNCH_TIMEOUT_MS;
+              state.approachElapsedMs = 0;
               state.alignSteps = 0;
             } else {
               tryLandingBoost(ball, state);
@@ -230,10 +253,7 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
         } else if (launchedBalls.has(ballId)) {
           const state = launchedBalls.get(ballId);
           if (state) {
-            if (ball.collisionFilter && ball.collisionFilter.mask === 0) {
-              ball.collisionFilter.mask = state.originalMask;
-            }
-
+            restoreMask(ball, state);
             const distSq = (ball.position.x - x) ** 2 + (ball.position.y - y) ** 2;
             if (distSq > 150 ** 2) {
               launchedBalls.delete(ballId);
@@ -252,8 +272,14 @@ export function createLauncher(options: LauncherOptions = {}): LauncherPart {
         }
       }
 
-      for (const [id] of launchedBalls.entries()) {
+      for (const [id, state] of launchedBalls.entries()) {
         if (!seenIds.has(id)) {
+          const b = balls.find(
+            (ball) => (ball.plugin as { ballData?: { id: number } })?.ballData?.id === id
+          );
+          if (b) {
+            restoreMask(b, state);
+          }
           launchedBalls.delete(id);
         }
       }
