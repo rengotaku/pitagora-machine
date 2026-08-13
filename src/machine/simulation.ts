@@ -326,6 +326,19 @@ export function startSimulation(
     bounceSpeed: 6.5,
   });
 
+  // 11. 下部振り子 (坂2の左寄り区間 x=560 付近の上空、左下の空白領域を動く)
+  const lowerPendulum = createPendulum({
+    pivotX: 560,
+    pivotY: 522,
+    armLength: 78,
+    bobRadius: 15,
+    periodMs: 2400,
+    amplitudeRad: 0.45,
+    sensorY: 635,
+    sensorWidth: 160,
+    sensorHeight: 90,
+  });
+
   Matter.Composite.add(engine.world, [
     ...ramp1.bodies,
     ...ramp1ToSeesawChute.bodies,
@@ -342,6 +355,7 @@ export function startSimulation(
     ...dominoRow.bodies,
     ...wheel.bodies,
     ...bounceFloor.bodies,
+    ...lowerPendulum.bodies,
   ]);
   Matter.Composite.add(engine.world, seesaw.constraints);
 
@@ -390,6 +404,7 @@ export function startSimulation(
     wheel: 0,
     bounceFloor: 0,
     landingBoost: 0,
+    lowerPendulum: 0,
   };
 
   /**
@@ -565,6 +580,10 @@ export function startSimulation(
 
         bounceFloor.update(engine, () => {
           gimmicks.bounceFloor += 1;
+        });
+
+        lowerPendulum.update(engine, dt, () => {
+          gimmicks.lowerPendulum += 1;
         });
       },
     });
@@ -814,6 +833,7 @@ export function startSimulation(
       dominoRow.reset();
       wheel.reset();
       bounceFloor.reset();
+      lowerPendulum.reset();
 
       timestepCalc.reset();
       trailTracker.clear();
@@ -837,6 +857,7 @@ export function startSimulation(
       gimmicks.wheel = 0;
       gimmicks.bounceFloor = 0;
       gimmicks.landingBoost = 0;
+      gimmicks.lowerPendulum = 0;
 
       spawnBall();
       msSinceLastSpawn = 0;
