@@ -7,6 +7,7 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from "../config";
+import type { BallTrailTracker } from "../lib/ball-trail";
 import type { ViewportTransform } from "../lib/viewport";
 import { getBallData } from "../machine/ball";
 
@@ -55,7 +56,8 @@ export function renderWorld(
   transform: ViewportTransform,
   cssWidth: number,
   cssHeight: number,
-  debugEnabled = false
+  debugEnabled = false,
+  trailTracker?: BallTrailTracker
 ): void {
   // 1. レターボックス領域の背景塗りつぶし
   ctx.fillStyle = SURROUND_COLOR;
@@ -81,6 +83,11 @@ export function renderWorld(
 
   // 3. 全 Body の描画
   const bodies = Matter.Composite.allBodies(engine.world);
+
+  if (debugEnabled && trailTracker) {
+    const balls = bodies.filter((b) => b.label === "ball");
+    drawBallTrails(ctx, balls, trailTracker);
+  }
 
   for (const body of bodies) {
     if (body.label === "ball") {
@@ -130,6 +137,47 @@ function drawDebugSensor(ctx: CanvasRenderingContext2D, body: Matter.Body): void
         ctx.lineTo(vertices[i].x, vertices[i].y);
       }
       ctx.closePath();
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+/**
+ * デバッグ表示が有効なとき、ボールの直近の軌跡を線 (moveTo / lineTo) で描画する。
+ * 🔴 制約: ctx.arc は絶対に使わないこと (verify-continuity.mjs の円判定フックを誤作動させないため)。
+ */
+function drawBallTrails(
+  ctx: CanvasRenderingContext2D,
+  balls: Matter.Body[],
+  trailTracker: BallTrailTracker
+): void {
+  ctx.save();
+  ctx.lineWidth = 2.0;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  for (const ball of balls) {
+    const data = getBallData(ball);
+    if (!data) continue;
+    const trail = trailTracker.getTrail(data.id);
+    if (trail.length < 2) continue;
+
+    const ballColor = data.color ?? FALLBACK_BALL_COLOR;
+    const len = trail.length;
+
+    for (let i = 0; i < len - 1; i += 1) {
+      const p1 = trail[i];
+      const p2 = trail[i + 1];
+
+      // 古いセグメントほど透明
+      const ratio = (i + 1) / (len - 1);
+      ctx.globalAlpha = ratio * 0.6;
+      ctx.strokeStyle = ballColor;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
       ctx.stroke();
     }
   }

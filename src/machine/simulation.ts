@@ -1,5 +1,6 @@
 import Matter from "matter-js";
 import { BIRCH_SHADOW_COLOR, WORLD_HEIGHT, WORLD_WIDTH } from "../config";
+import { createBallTrailTracker } from "../lib/ball-trail";
 import { runFixedSteps } from "../lib/frame-scheduler";
 import { createNudgeTracker, type NudgeSample } from "../lib/nudge";
 import { createRng } from "../lib/random";
@@ -108,6 +109,8 @@ export function startSimulation(
     minTravelDistance: 20,
     stallDurationMs,
   });
+
+  const trailTracker = createBallTrailTracker();
 
   // 押し出し (nudge)。経路 (勾配・摩擦・着地条件・仕掛けの間隔) の見直しを
   // 優先して詰まりの大半を解消したうえで、それでも残る局所的な停滞に対する
@@ -455,6 +458,7 @@ export function startSimulation(
     if (data) {
       stallTracker.forget(data.id);
       nudgeTracker.forget(data.id);
+      trailTracker.forget(data.id);
       countedRamp1.delete(data.id);
       countedSeesaw.delete(data.id);
       countedRamp2.delete(data.id);
@@ -613,6 +617,7 @@ export function startSimulation(
         if (data) {
           stallTracker.forget(data.id);
           nudgeTracker.forget(data.id);
+          trailTracker.forget(data.id);
           countedRamp1.delete(data.id);
           countedSeesaw.delete(data.id);
           countedRamp2.delete(data.id);
@@ -686,6 +691,7 @@ export function startSimulation(
         Matter.Composite.remove(engine.world, targetBall);
         stallTracker.forget(stalledId);
         nudgeTracker.forget(stalledId);
+        trailTracker.forget(stalledId);
         countedRamp1.delete(stalledId);
         countedSeesaw.delete(stalledId);
         countedRamp2.delete(stalledId);
@@ -712,9 +718,18 @@ export function startSimulation(
       nextDelayMs = nextSpawnDelay(rng, minSpawnDelayMs, maxSpawnDelayMs);
     }
 
+    if (debugEnabled) {
+      for (const ball of currentBalls) {
+        const data = getBallData(ball);
+        if (data) {
+          trailTracker.addPoint(data.id, ball.position);
+        }
+      }
+    }
+
     updateStats();
 
-    renderWorld(ctx, engine, transform, cssWidth, cssHeight, debugEnabled);
+    renderWorld(ctx, engine, transform, cssWidth, cssHeight, debugEnabled, trailTracker);
   };
 
   // RAF から駆動する自動ループ。1 フレーム分の更新 (tick) を実行した後、まだ稼働中なら
@@ -775,6 +790,9 @@ export function startSimulation(
     },
     setDebugEnabled(value: boolean): void {
       debugEnabled = value;
+      if (!value) {
+        trailTracker.clear();
+      }
     },
     reset(): void {
       // 装置の構造 (坂・シーソー・振り子等の配置) は一切作り直さない。
@@ -803,6 +821,7 @@ export function startSimulation(
       bounceFloor.reset();
 
       timestepCalc.reset();
+      trailTracker.clear();
 
       elapsedMs = 0;
       msSinceLastSpawn = 0;
