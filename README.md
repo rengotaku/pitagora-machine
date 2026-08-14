@@ -1,5 +1,7 @@
 # pitagora-machine
 
+**→ [ブラウザで見る](https://rengotaku.github.io/pitagora-machine/)**（GitHub Pages。main への push で自動デプロイされる）
+
 ブラウザで動く、眺め続けるためのピタゴラ装置（ルーブ・ゴールドバーグ・マシン）。
 
 複数のボールが坂を転がり、落ち、シーソーを傾け、発射され、ドミノを倒し、
