@@ -2,6 +2,8 @@
 
 **→ [ブラウザで見る](https://rengotaku.github.io/pitagora-machine/)**（GitHub Pages。main への push で自動デプロイされる）
 
+**→ [Kinetic Chain No.10 を見る](https://rengotaku.github.io/pitagora-machine/chain/)**（1 個の鋼球が 28 段の仕掛けを連鎖させる別ページ。物理エンジンを使わず、毎回同じ動きでゴールまで届く）
+
 ブラウザで動く、眺め続けるためのピタゴラ装置（ルーブ・ゴールドバーグ・マシン）。
 
 複数のボールが坂を転がり、落ち、シーソーを傾け、発射され、ドミノを倒し、
@@ -37,6 +39,7 @@ make run       # http://localhost:5173
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 構成・ループの構造・どこを触れば何が変わるか |
 | [docs/adr/](docs/adr/README.md) | 設計判断の記録（変えてよい前提 / 壊すと危ない前提つき） |
 | [docs/verification.md](docs/verification.md) | 長時間の安定稼働を検証する手順と判定基準 |
+| [public/chain/index.html](public/chain/index.html) | 連鎖アニメーション（別ページ）。構成は ARCHITECTURE の「別ページ」節 |
 
 ## 技術
 

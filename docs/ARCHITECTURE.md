@@ -116,3 +116,28 @@ make run     # 開発サーバ
 ```
 
 長時間の安定性は `scripts/verify-stability.mjs` で計測する。CDP でページを開き、一定間隔で `window.__pitagora` を回収しながらスクリーンショットと JS 例外・`console.error` を記録する。判定基準は `docs/verification.md` を参照。
+
+## 別ページ: Kinetic Chain No.10（`public/chain/`）
+
+トップの装置とは別に、`/chain/` に連鎖アニメーションを置いている。1 個の鋼球が 28 段の仕掛けを順に起動してゴールまで進む作品で、**物理エンジンを使わない**。判断の経緯は [ADR 0006](adr/0006-chain-page-deterministic-separate-page.md)。
+
+`public/chain/index.html` は HTML 1 ファイルで、Vite はこれを加工せずに `dist/chain/` へコピーする。TypeScript のビルド・lint・format の対象には入っていない。
+
+```
+public/chain/index.html
+  ├ SIM-BEGIN 〜 SIM-END   決定論シミュレーション。DOM に触れない。固定刻み 1/240 秒
+  │   GEO（座標）→ Sim.prototype.stepA（ボール A のフェーズ）→ 各装置の step*
+  └ それ以降               描画・音・カメラ・UI。シミュレーションの状態を読むだけ
+```
+
+| やりたいこと | 触る場所 |
+|---|---|
+| 仕掛けを足す・動きを変える | `GEO` → `stepA` のフェーズ → `onEvent`（音・火花）→ `draw*` → `camTarget` → `STAGES` / `TAGS` の順 |
+| 段の番号・名前を変える | `STAGES` と `TAGS`（並びは段の番号順）。`setStage(k, ...)` の k と揃える |
+| 画面外の装置を描かない範囲を変える | `CULL`（装置ごとの外接矩形）。装置を動かしたら測り直す |
+
+放物線は始点・終点・時間から初速を逆算する（`ballistic`）ので、狙った点に必ず当たる。シミュレーション部分だけを Node で早送りして、完走することと毎回同じ結果になることを `scripts/chain-sim.test.mjs` が確かめる（`make ci` に含まれる）。
+
+```bash
+node scripts/chain-sim.mjs   # done true / endT 40.66 s / repeat identical true
+```
