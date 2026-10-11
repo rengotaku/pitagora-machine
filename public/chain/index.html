@@ -171,8 +171,26 @@ const GEO = (() => {
   g.rail2Pts = joinP(bezP([2650, 880], [2690, 935], [2760, 935], [2860, 940], 30), bezP([2860, 940], [2980, 944], [3080, 1012], [3185, 1000], 40), lineP([3185, 1000], [3264, 1000], 10));
   g.pathRail2 = new Path(g.rail2Pts);
   g.floorY = 1000; g.dipX = 3215; g.dipW = 30; g.dipD = 5;
-  g.platY = 1014; g.domP0 = 3290; g.domGap = 34; g.domW = 12; g.domH = 66; g.domN = 12;
-  const LX = g.domP0 + (g.domN - 1) * g.domGap + 127;
+  g.platY = 1014; g.domP0 = 3290; g.domGap = 34; g.domW = 12; g.domH = 66; g.domN = 5;
+  // レバーから先の装置は、ドミノの枚数と独立に位置を固定する
+  const LX = 3791;
+  // ドミノの城。左塔(0) → 城壁(1) → 右塔(2) の順に崩れ、右塔の破片がレバーの左端を押す
+  // 部材は 左端 x・下端 yb・幅 w・高さ h・種類 k（p 柱 / s 床板 / m 胸壁 / f 旗）
+  g.cs = { x0: 3456, pc: [], groups: [{ px: 3516, om: 1.5 }, { px: 3636, om: 1.2 }, { px: 3700, om: .8 }] };
+  {
+    const P = g.cs.pc, add = (grp, x, yb, w, h, k) => P.push({ grp, x, yb, w, h, k, tier: Math.floor((g.platY - yb) / 70) });
+    const tower = (grp, xl) => {
+      let y = g.platY;
+      for (let t = 0; t < 3; t++) { add(grp, xl, y, 12, 66, 'p'); add(grp, xl + 48, y, 12, 66, 'p'); y -= 66; add(grp, xl, y, 60, 10, 's'); y -= 10; }
+      [0, 24, 48].forEach(dx => add(grp, xl + dx, y, 12, 16, 'm'));
+      add(grp, xl + 28, y - 16, 4, 40, 'f');
+    };
+    tower(0, 3456);
+    [3522, 3550, 3602, 3622].forEach(x => add(1, x, g.platY, 12, 66, 'p')); add(1, 3520, 948, 116, 10, 's');
+    [3530, 3572, 3614].forEach(x => add(1, x, 938, 12, 66, 'p')); add(1, 3526, 872, 104, 10, 's');
+    [3528, 3554, 3580, 3606].forEach(x => add(1, x, 862, 12, 16, 'm'));
+    tower(2, 3640);
+  }
   g.lev = { x: LX, y: 978, la: 82, ra: 120, b0: 0.2, b1: -0.2, t: 5 };
   g.rodBase = g.lev.y + g.lev.ra * Math.sin(g.lev.b0);
   g.stopX = LX + 118; g.stopBottom = 834;
@@ -194,18 +212,22 @@ const GEO = (() => {
   g.binB = [g.wc[0] + 34, 1330];
   // ---- 中段の下 → つづら折り → 下段
   g.low0 = [3150, 1390]; g.low1 = [4900, 1480]; g.lowLen = Math.hypot(1750, 90);
-  // 戻り直線の途中に水切りプール。lip で水面へ飛び出し、touch の各点で跳ね、glide で水面を滑って land からレールへ戻る
-  g.pool = { x0: 3640, x1: 4800, top: 1930, bot: 2012, lip: 4770, land: 3700, touch: [4610, 4415, 4250, 4115, 4005, 3915], glide: 3800, hs: [8, 42, 30, 20, 12, 6, 0, 14] };
+  // ワープ土管: 低段の終点で入口の土管に吸い込まれ、hold 秒後にプール右上の出口の土管から左へ飛び出して水切りに入る
+  g.pool = { x0: 3640, x1: 5340, top: 1930, bot: 2012, land: 3700 };
   g.t3Y = (x) => 1900 - (5400 - x) * 10 / 2405;
-  g.sbParts = {
-    s1: lineP([4900, 1480], [5400, 1540], 30), a1: arcP(5400, 1580, 40, -PI / 2, PI / 2, 20),
-    s2: lineP([5400, 1620], [4950, 1680], 30), a2: arcP(4950, 1720, 40, -PI / 2, -1.5 * PI, 20),
-    s3: lineP([4950, 1760], [5400, 1820], 30), a3: arcP(5400, 1860, 40, -PI / 2, PI / 2, 20),
-    t3: lineP([5400, 1900], [g.pool.lip, g.t3Y(g.pool.lip)], 32)
-  };
-  const sp = g.sbParts;
-  g.pathLow = new Path(joinP(lineP(g.low0, g.low1, 80), sp.s1, sp.a1, sp.s2, sp.a2, sp.s3, sp.a3, sp.t3));
-  g.sbS0 = g.lowLen;
+  const skS = g.pool.top - R + 5;
+  g.warp = { in: [4945, 1480], out: [5300, 1846], hold: .42 };
+  g.warpOut = ballistic(g.warp.out, [5150, skS], .15);
+  // 水切り: どの跳ねも同じ重力の弾道。着水のたびに横の速さが 7%、跳ねる高さが 38% ずつ落ち、最後は land のレールへ跳び乗る
+  {
+    const hs = [36]; for (let i = 1; i < 6; i++) hs.push(hs[i - 1] * .62);
+    const Ts = hs.map(h => 2 * Math.sqrt(2 * h / G)), Tf = .28, k = .93, x0 = g.warpOut.p1[0];
+    let wsum = 0, kk = 1; Ts.forEach(T => { wsum += kk * T; kk *= k; }); wsum += kk * Tf;
+    let x = x0, v = (x0 - g.pool.land) / wsum; g.skim = [];
+    Ts.forEach(T => { const x1 = x - v * T; g.skim.push(ballistic([x, skS], [x1, skS], T)); x = x1; v *= k; });
+    g.skim.push(ballistic([x, skS], [g.pool.land, g.t3Y(g.pool.land)], Tf));
+  }
+  g.pathLow = new Path(lineP(g.low0, g.low1, 80));
   g.pathLow2 = new Path(lineP([g.pool.land, g.t3Y(g.pool.land)], [2995, 1890], 36));
   g.boost2 = [160, 420, 2600];
   g.cupX = 2965; g.cupY = 1890; g.cupW = 34; g.cupD = 14;
@@ -293,6 +315,7 @@ Sim.prototype.reset = function () {
   this.ham = { psi: g.ham.psi0, w: 0, rel: false, hit: false };
   this.rack = 0; this.fun = null; this.C = []; this.mg = null;
   this.pads = [0, 1, 2].map(() => ({ d: 0, v: 0 })); this.spr = { d: 0, v: 0 }; this.plts = [0, 1, 2].map(() => ({ d: 0, v: 0 })); this.grav = { on: false, k: 0 };
+  this.cs = { trig: [null, null, null], due: [null, null, null], nAct: 0, p: g.cs.pc.map(q => ({ cx: q.x + q.w / 2, cy: q.yb - q.h / 2, a: 0, vx: 0, vy: 0, w: 0, hw: q.w / 2, hh: q.h / 2, st: 0, tAct: 0, gnd: false, rest: 0, x0: q.x, x1: q.x + q.w, top: q.yb - q.h })) };
 };
 Sim.prototype.emit = function (type, x, y, m) { this.ev.push({ type, x, y, m: m == null ? 1 : m, t: this.t }); };
 // 段は並行して起きることがあるので、段ごとに「起きた時刻」を持つ
@@ -305,7 +328,7 @@ Sim.prototype.step = function (dt) {
   this.t += dt;
   this.stepA(dt); this.stepPlunger(dt); this.stepBumpers(dt);
   this.stepCradle(dt); this.stepPaddle(dt); this.stepPlank(dt);
-  this.stepDominoes(dt); this.stepLever(dt); this.stepB(dt); this.stepWheel(dt); this.stepHammer(dt); this.stepC(dt); this.stepMerge(dt); this.stepPads(dt);
+  this.stepDominoes(dt); this.stepCastle(dt); this.stepLever(dt); this.stepB(dt); this.stepWheel(dt); this.stepHammer(dt); this.stepC(dt); this.stepMerge(dt); this.stepPads(dt);
 };
 // 経路に沿った転がり。boost 区間では電磁加速が加わる
 Sim.prototype.roll = function (o, dt) {
@@ -437,26 +460,23 @@ Sim.prototype.stepA = function (dt) {
     }); break;
     case 'rail3':
       A.onRail = true;
-      if (this.roll(A, dt)) {
-        // 水面へ飛び出す。跳ねるたびに少しずつ失速し、跳ねる高さも下がっていく
-        const P = g.pool, S = P.top - R + 5, v0 = clamp(A.roll.v, 800, 1300);
-        const pts = [[A.x, A.y], ...P.touch.map(x => [x, S]), [P.glide, S], [P.land, g.t3Y(P.land)]];
-        A.sk = []; for (let i = 1; i < pts.length; i++) { const v = v0 * .95 ** (i - 1); A.sk.push({ p0: pts[i - 1], p1: pts[i], h: P.hs[i - 1], T: Math.abs(pts[i][0] - pts[i - 1][0]) / v }); }
-        A.phase = 'skim'; A.si = 0; A.pt = 0; this.emit('jump', A.x, A.y, .6);
-      }
-      else if (A.roll.s >= g.sbS0 && this.stageT[13] == null) { this.emit('switch', A.x, A.y, 1); this.setStage(13, A.x, A.y); }
+      if (this.roll(A, dt)) { A.phase = 'warp'; A.pt = 0; A.wv = A.roll.v; A.x0 = A.x; this.emit('warpIn', g.warp.in[0], g.warp.in[1], 1); this.setStage(13, A.x, A.y); }
       break;
-    case 'skim': {
-      const k = A.sk[A.si]; A.pt += dt; const u = Math.min(A.pt / k.T, 1);
-      A.x = lerp(k.p0[0], k.p1[0], u); A.y = lerp(k.p0[1], k.p1[1], u) - 4 * k.h * u * (1 - u);
-      A.vx = (k.p1[0] - k.p0[0]) / k.T; A.vy = (k.p1[1] - k.p0[1] - 4 * k.h * (1 - 2 * u)) / k.T; A.spin += Math.abs(A.vx) * dt / R;
-      if (A.pt >= k.T) {
-        A.pt = 0; A.si++;
-        if (A.si < A.sk.length) { if (A.si <= g.pool.touch.length) this.emit('skip', A.x, g.pool.top, A.si); }
-        else { this.emit('land', A.x, A.y + 14, .8); A.phase = 'rail3b'; A.roll = { path: g.pathLow2, s: 0, v: Math.abs(A.vx), k: 5 / 7, f: .1 }; }
-      }
+    case 'warp': {
+      // 土管の口へ滑り込んで消え、hold 秒後に出口から現れる
+      A.pt += dt; const W0 = g.warp;
+      if (A.pt < .06) { A.x = A.x0 + A.wv * A.pt; A.y = W0.in[1]; A.vx = A.wv; A.vy = 0; }
+      else { A.vis = 0; A.x = W0.in[0] + 40; A.y = W0.in[1]; }
+      A.spin += A.wv * dt / R;
+      if (A.pt >= W0.hold) { A.vis = 1; A.phase = 'warpOut'; A.pt = 0; this.emit('warpOut', W0.out[0], W0.out[1], 1); }
       break;
     }
+    case 'warpOut': this.fly(A, g.warpOut, dt, () => { this.emit('skip', A.x, g.pool.top, 1); A.phase = 'skim'; A.si = 0; }); break;
+    case 'skim': this.fly(A, g.skim[A.si], dt, () => {
+      A.si++;
+      if (A.si < g.skim.length) this.emit('skip', A.x, g.pool.top, A.si + 1);
+      else { this.emit('land', A.x, A.y + 14, .8); A.phase = 'rail3b'; A.roll = { path: g.pathLow2, s: 0, v: Math.abs(g.skim[A.si - 1].vx), k: 5 / 7, f: .1 }; }
+    }); break;
     case 'rail3b': A.onRail = true; if (this.roll(A, dt)) { A.phase = 'cup'; A.sv = A.vx; A.cupT = 0; this.emit('cupIn', A.x, A.y, 1); } break;
     case 'cup': {
       const dx = A.x - g.cupX; A.cupT += dt;
@@ -590,13 +610,6 @@ Sim.prototype.domHits = function (i, th, thn) {
   const lx = dx * Math.cos(thn) + dy * Math.sin(thn), ly = -dx * Math.sin(thn) + dy * Math.cos(thn);
   return lx > -g.domW && lx < 2 && ly > -g.domH - .5 && ly < 0;
 };
-Sim.prototype.levHits = function (th) {
-  const g = GEO, L = g.lev, b = this.lev.b, p = g.domP0 + (g.domN - 1) * g.domGap;
-  const x = p + g.domH * Math.sin(th), y = g.platY - g.domH * Math.cos(th);
-  const leftX = L.x - L.la * Math.cos(b);
-  if (x < leftX - 1 || x > L.x) return false;
-  return y > L.y + (x - L.x) * Math.tan(b) - L.t / Math.cos(b);
-};
 Sim.prototype.solveMax = function (hi, hits) { let lo = 0; for (let k = 0; k < 18; k++) { const m = (lo + hi) / 2; if (hits(m)) hi = m; else lo = m; } return lo; };
 Sim.prototype.stepDominoes = function (dt) {
   const g = GEO, D = this.dom, KD = 3 * G / (g.domW ** 2 + g.domH ** 2);
@@ -614,12 +627,9 @@ Sim.prototype.stepDominoes = function (dt) {
           this.emit('dom', px + g.domGap - g.domW, g.platY - g.domH * .9, i + 1);
         } else d.w = 0;
       }
-    } else if (this.levHits(d.th)) {
-      d.th = this.solveMax(d.th, (t) => this.levHits(t));
-      if (!this.lev.hit) {
-        this.lev.hit = true; this.lev.w = -clamp(d.w * .9, 1.8, 4); d.w *= .3;
-        this.emit('lever', g.lev.x - g.lev.la, g.lev.y - 16, 1); this.setStage(9, g.lev.x, g.lev.y);
-      } else d.w = 0;
+    } else if (this.cs.trig[0] == null) {
+      const tx = px + g.domH * Math.sin(d.th), ty = g.platY - g.domH * Math.cos(d.th);
+      if (tx >= g.cs.x0 && ty > g.platY - g.domH) { this.castleTrigger(0); d.w *= .5; }
     }
   }
 };
@@ -752,6 +762,82 @@ Sim.prototype.stepMerge = function (dt) {
   }
 };
 Sim.prototype.bounce = function (i) { this.pads[i].v = 14; this.emit('tramp', GEO.trX[i], GEO.trY, i); };
+// ---- ドミノの城の崩落。部材は剛体の板として落ち、床・レバー・止まった部材やまだ立っている部材の上面に当たって跳ねて止まる
+const ihash = (n) => { n = (n ^ 61) ^ (n >>> 16); n = n + (n << 3); n ^= n >>> 4; n = Math.imul(n, 0x27d4eb2d); n ^= n >>> 15; return (n >>> 0) / 4294967296; };
+const CORN = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+Sim.prototype.castleTrigger = function (gi) {
+  const cs = this.cs, gr = GEO.cs.groups[gi]; if (cs.trig[gi] != null) return;
+  cs.trig[gi] = this.t;
+  GEO.cs.pc.forEach((q, i) => { if (q.grp === gi) cs.p[i].tAct = this.t + q.tier * .012 + ihash(i * 7 + 3) * .02; });
+  // 隣の群は、触れたら崩れる。触れなくても一定時間で崩れる
+  if (gi < 2) cs.due[gi + 1] = this.t + .7;
+  this.emit('castle', gr.px - 30, GEO.platY - 120, gi);
+};
+Sim.prototype.castleActivate = function (i) {
+  const p = this.cs.p[i], q = GEO.cs.pc[i], gr = GEO.cs.groups[q.grp], P = GEO.platY;
+  // 群の右下の角を支点に倒れ始める剛体の速度を初速にし、部材ごとに少しずらす
+  p.st = 1; this.cs.nAct++;
+  p.vx = gr.om * (P - p.cy) + (ihash(i * 13 + 1) - .5) * 60;
+  p.vy = gr.om * (p.cx - gr.px) * .6 - ihash(i * 17 + 5) * 40;
+  p.w = q.k === 'p' && q.tier === 0 ? 3 + ihash(i * 19 + 2) : gr.om * (1 + (ihash(i * 19 + 2) - .5) * 1.2);
+};
+Sim.prototype.stepCastle = function (dt) {
+  const cs = this.cs, g = GEO, P = cs.p, Q = g.cs.pc, L = g.lev;
+  if (cs.trig[0] == null) return;
+  for (let k = 1; k < 3; k++) if (cs.due[k] != null && cs.trig[k] == null && this.t >= cs.due[k]) this.castleTrigger(k);
+  for (let i = 0; i < P.length; i++) if (P[i].st === 0 && cs.trig[Q[i].grp] != null && this.t >= P[i].tAct) this.castleActivate(i);
+  if (!cs.nAct) return;
+  const b = this.lev.b, lx0 = L.x - L.la * Math.cos(b), lx1 = L.x + L.ra * Math.cos(b), tb = Math.tan(b), lt = L.t / Math.cos(b);
+  for (let i = 0; i < P.length; i++) {
+    const p = P[i], q = Q[i]; if (p.st !== 1) continue;
+    p.vy += G * dt; p.cx += p.vx * dt; p.cy += p.vy * dt; p.a += p.w * dt;
+    if (p.cx > 3815) { p.cx = 3815; p.vx = -Math.abs(p.vx) * .3; }
+    const c = Math.cos(p.a), s = Math.sin(p.a);
+    let pen = 0, cxk = p.cx, onLev = false, push = 0, maxY = -1e9;
+    for (const [sx, sy] of CORN) {
+      const x = p.cx + sx * p.hw * c - sy * p.hh * s, y = p.cy + sx * p.hw * s + sy * p.hh * c;
+      if (y > maxY) maxY = y;
+      let fl = g.platY, lev = false;
+      for (let j = 0; j < P.length; j++) {
+        const o = P[j]; if (j === i || o.st === 1 || x <= o.x0 || x >= o.x1) continue;
+        if (p.cy < o.top) { if (o.top < fl) fl = o.top; }
+        else if (o.st === 0 && Q[j].grp > q.grp && y > o.top && p.vx > 0) {
+          // まだ立っている隣の群の側面にもたれかかる
+          push = Math.max(push, x - o.x0);
+          const k = Q[j].grp; cs.due[k] = Math.min(cs.due[k] == null ? 1e9 : cs.due[k], Math.max(this.t + .05, cs.trig[k - 1] + .35));
+        }
+      }
+      if (x > lx0 && x < lx1) { const ly = L.y + (x - L.x) * tb - lt; if (p.cy < ly && ly < fl) { fl = ly; lev = x <= L.x; } }
+      if (y - fl > pen) { pen = y - fl; cxk = x; onLev = lev; }
+    }
+    if (push > 0) { p.cx -= push; p.vx = -p.vx * .15; }
+    p.gnd = pen > 0;
+    if (p.gnd) {
+      p.cy -= pen;
+      const I = (4 * p.hw * p.hw + 4 * p.hh * p.hh) / 12;
+      // 落ちてきて当たったときだけ跳ね返す。置かれているだけなら下向きの速度を消す
+      if (p.vy > 40) {
+        if (p.vy > 240) this.emit('brick', cxk, p.cy + p.hh * .5, Math.min(1, p.vy / 700));
+        if (onLev && !this.lev.hit) { this.lev.hit = true; this.lev.w = -clamp(p.vy / 220 + 1.2, 1.8, 4); this.emit('lever', L.x - L.la, L.y - 16, 1); this.setStage(9, L.x, L.y); }
+        p.w = clamp(p.w * .6 - (cxk - p.cx) * p.vy * .15 / I, -14, 14);
+        p.vy = -p.vy * .2; p.vx *= .7;
+      } else if (p.vy > 0) p.vy = 0;
+      p.w += 3 * G * (p.cx - cxk) / (12 * I) * dt;
+      // 面で接地しかけている（0°/90° に近い）ときは揺れを強く止める
+      const flat = Math.abs(p.a - Math.round(p.a / (PI / 2)) * (PI / 2)) < .15;
+      p.vx *= Math.exp(-5 * dt); p.w *= Math.exp(-(flat ? 14 : Math.abs(p.w) < 1.5 ? 7 : 2.5) * dt);
+      p.rest = Math.abs(p.vx) < 30 && Math.abs(p.vy) < 60 && Math.abs(p.w) < .8 ? p.rest + dt : 0;
+    } else p.rest = Math.max(0, p.rest - dt);
+    if ((p.rest > .3 && !onLev) || this.t - p.tAct > 4) {
+      // 止まったら近い向き（0°/90°）に揃えて固定する。下端の高さは揃える前と同じにする
+      const na = Math.round(p.a / (PI / 2)) * (PI / 2);
+      if (Math.abs(p.a - na) < .25) { p.a = na; const c2 = Math.cos(na), s2 = Math.sin(na); p.cy += maxY - pen - (p.cy + Math.abs(p.hw * s2) + Math.abs(p.hh * c2)); }
+      p.st = 2; p.vx = p.vy = p.w = 0; cs.nAct--;
+    }
+    const c3 = Math.cos(p.a), s3 = Math.sin(p.a), ex = Math.abs(p.hw * c3) + Math.abs(p.hh * s3), ey = Math.abs(p.hw * s3) + Math.abs(p.hh * c3);
+    p.x0 = p.cx - ex; p.x1 = p.cx + ex; p.top = p.cy - ey;
+  }
+};
 Sim.prototype.plate = function (i) { const p = GEO.plates[i]; this.plts[i].v = 12; this.emit('plate', p.x, p.y, i); };
 Sim.prototype.stepPads = function (dt) {
   for (const p of this.pads) { p.v += (-520 * p.d - 9 * p.v) * dt; p.d += p.v * dt; }
@@ -769,15 +855,15 @@ window.__CHAIN = { sim, GEO, Sim };
 
 const STAGES = [
   ['LAUNCH', '発射'], ['PIN', 'ピン'], ['BUMPERS', 'バンパー3連'], ['LOOP', '宙返りループ'], ['JUMP', 'ジャンプ台'],
-  ['CRADLE', 'ニュートンのゆりかご'], ['TRAPDOOR', '落とし戸'], ['DOMINO', 'ドミノ12枚'], ['LEVER', 'レバー'], ['BALL B', '第2球'],
-  ['GEAR', '水車と歯車'], ['GATE', 'ゲート'], ['SWITCHBACK', 'つづら折りと水切り'], ['HAMMER', '振り子ハンマー'], ['CHIME', '鉄琴'],
+  ['CRADLE', 'ニュートンのゆりかご'], ['TRAPDOOR', '落とし戸'], ['DOMINO', 'ドミノの城'], ['LEVER', 'レバー'], ['BALL B', '第2球'],
+  ['GEAR', '水車と歯車'], ['GATE', 'ゲート'], ['WARP', 'ワープ土管と水切り'], ['HAMMER', '振り子ハンマー'], ['CHIME', '鉄琴'],
   ['HELIX', 'らせん'], ['SPLIT', '3分裂'], ['AIR HOOPS', '空中リング'], ['TRIPLE LOOP', '3連ループ'], ['PACHINKO', 'ピン落とし'],
   ['STANDBY', '3球待機'], ['SELECT', '1球選抜'], ['GIANT LOOP', '大ループ'],
   ['BOUNCE', '高速バウンス'], ['DASH', 'ダッシュ'], ['SPRING', 'バネ'], ['GRAVITY', '重力装置'], ['GOAL', 'ゴール']
 ];
 const NST = STAGES.length;
-const TAGS = [[118, 880], [515, 52], [600, 580], [1440, 300], [2120, 420], [2820, 470], [2560, 790], [3300, 912], [3700, 906], [3800, 760],
-  [3640, 1210], [3080, 1080], [4980, 1430], [3070, 1450], [2280, 1830],
+const TAGS = [[118, 880], [515, 52], [600, 580], [1440, 300], [2120, 420], [2820, 470], [2560, 790], [3300, 912], [3778, 902], [3800, 760],
+  [3640, 1270], [3080, 1080], [4840, 1420], [3070, 1450], [2280, 1830],
   [1560, 2180], [1890, 2700], [2560, 2140], [2620, 2440], [2240, 3120], [3640, 2460], [4120, 2640], [4500, 2420],
   [4940, 3040], [3250, 3110], [1960, 3090], [610, 2640], [300, 3050]];
 const BOOSTS = [GEO.boost1, GEO.boost2, GEO.boost3];
@@ -804,7 +890,7 @@ function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = 
 const fx = {
   reset() {
     this.rng = mulberry32(20261007); this.parts = []; this.rings = []; this.bolts = []; this.flash = {}; this.shake = 0; this.punch = 0; this.white = 0;
-    this.trail = []; this.bubbles = []; this.ripple = 0; this.rippleX = 0; this.slowUntil = 0; this.slowF = 1; this.tagPop = new Array(NST + 1).fill(0); this.wrip = []; this.wake = null; this.crT = 9; this.debris = DEBRIS0.map(d => ({ ...d, y: d.rest, vy: 0, rot: d.r0 })); this.goalT = -1; this.dial = 0; this.dialV = 0; this.xylo = new Array(8).fill(0);
+    this.trail = []; this.bubbles = []; this.ripple = 0; this.rippleX = 0; this.slowUntil = 0; this.slowF = 1; this.tagPop = new Array(NST + 1).fill(0); this.wrip = []; this.wake = null; this.crT = 9; this.gearHit = 9; this.brickT = 0; this.debris = DEBRIS0.map(d => ({ ...d, y: d.rest, vy: 0, rot: d.r0 })); this.goalT = -1; this.dial = 0; this.dialV = 0; this.xylo = new Array(8).fill(0);
   },
   spark(x, y, n, sp, col, up = 0, dir = null, spread = TAU) {
     for (let i = 0; i < n; i++) {
@@ -829,7 +915,7 @@ const fx = {
     this.bubbles = this.bubbles.filter(b => b.life < b.max && b.y > GEO.pool.top + 2);
     for (const w of this.wrip) w.t += dt; this.wrip = this.wrip.filter(w => w.t < 2);
     if (this.wake && sim.A.phase !== 'skim') this.wake.a *= Math.exp(-dt * 1.2);
-    this.crT += dt;
+    this.crT += dt; this.gearHit += dt;
     this.ripple *= Math.exp(-dt * 2.2);
     this.rings = this.rings.filter(r => r.t < r.dur);
     for (const b of this.bolts) b.t += dt;
@@ -939,10 +1025,30 @@ function onEvent(e) {
     case 'lever': fx.flash.lever = 1; fx.spark(e.x, e.y, 26, 500, AMB); kick(6, .35); Snd.thump(110, .6, .25); Snd.metal(640, .25, .5); slow(.5, 700); break;
     case 'leverStop': fx.flash.lever = Math.max(fx.flash.lever || 0, .6 * e.m); fx.spark(e.x, e.y, Math.round(10 * e.m), 300, AMB); Snd.noise(.05, 1400, 3, .3 * e.m); Snd.thump(90, .3 * e.m, .15); break;
     case 'releaseB': fx.flash.stopper = 1; fx.spark(e.x, e.y, 14, 300, COP); Snd.metal(1900, .18, .35); break;
-    case 'wheel': fx.flash.wheel = 1; fx.spark(e.x, e.y, 40, 640, COP); fx.ring(e.x, e.y, 14, 110, COP, .4); kick(8, .45); Snd.thump(160, .6, .25); Snd.metal(1100, .25, .6); slow(.42, 1500); break;
-    case 'lock': fx.flash.gate = 1; fx.spark(e.x, e.y, 30, 520, AMB); kick(8 * e.m, .4); Snd.thump(95, .65 * e.m, .22); Snd.noise(.08, 900, 2, .4 * e.m); break;
+    case 'castle': {
+      fx.flash['castle' + e.m] = 1; kick(e.m === 0 ? 11 : 8, .6); fx.ring(e.x, e.y, 14, 170, AMB, .45);
+      fx.spark(e.x, e.y, 46, 560, AMB, 160); fx.spark(e.x, e.y + 60, 30, 320, '200,185,160', 60, -PI / 2, 2.4);
+      Snd.thump(62 + e.m * 10, .85, .4); Snd.noise(.4, 650, 1.1, .38); Snd.metal(520 + e.m * 90, .18, .5);
+      if (e.m === 0) slow(.45, 1100);
+      break;
+    }
+    case 'brick': {
+      fx.spark(e.x, e.y, Math.round(3 + 7 * e.m), 120 + 320 * e.m, '205,190,165', 70, -PI / 2, 2.4);
+      if (e.m > .45) fx.spark(e.x, e.y, 4, 420, AMB, 80);
+      const now = performance.now(); if (now - fx.brickT > 45) { fx.brickT = now; Snd.thump(240 + fx.rng() * 180, .08 + .22 * e.m, .05); Snd.noise(.03, 2200 + fx.rng() * 1200, 3, .16 * e.m); }
+      break;
+    }
+    case 'warpIn': fx.flash.warpIn = 1; fx.ring(e.x, e.y, 6, 80, '120,255,190', .35); fx.spark(e.x + 6, e.y, 24, 420, '140,255,200'); kick(4, .25); Snd.sweep(260, 2200, .4, .26); Snd.noise(.12, 3000, 2, .2); break;
+    case 'warpOut': fx.flash.warpOut = 1; fx.white = .18; fx.ring(e.x, e.y, 8, 130, '120,255,190', .45); fx.spark(e.x, e.y, 44, 760, '140,255,200', 0, PI, 1.4); kick(9, .5); Snd.sweep(2200, 380, .35, .3); Snd.thump(120, .55, .2); slow(.5, 650); break;
+    case 'wheel': fx.gearHit = 0; fx.flash.wheel = 1; fx.spark(e.x, e.y, 40, 640, COP); fx.ring(e.x, e.y, 14, 110, COP, .4); kick(8, .45); Snd.thump(160, .6, .25); Snd.metal(1100, .25, .6); slow(.42, 1500); break;
+    case 'lock': {
+      fx.flash.gate = 1; fx.flash.train = 1; fx.spark(e.x, e.y, 30, 520, AMB); kick(10 * e.m, .5); Snd.thump(95, .65 * e.m, .22); Snd.noise(.08, 900, 2, .4 * e.m);
+      // 輪列が一斉に止まる。噛み合い部から火花が散る
+      trainMeshes().forEach((m, i) => { fx.spark(m[0], m[1], 22, 640, i % 2 ? HOT : WH, 60); fx.ring(m[0], m[1], 4, 46, HOT, .3); });
+      [0, 1, 2].forEach(i => later(() => Snd.metal(1300 + i * 420, .2, .35), i * 40));
+      break;
+    }
     case 'drop': fx.flash.gate = 1; Snd.sweep(1800, 300, .5, .2); break;
-    case 'switch': Snd.sweep(500, 2000, .6, .15); break;
     case 'cupIn': fx.spark(e.x, e.y + 10, 30, 520, AMB, 200); kick(6, .3); Snd.thump(140, .5, .2); Snd.metal(1300, .2, .3); break;
     case 'latch': fx.flash.latch = 1; fx.spark(e.x, e.y, 14, 300, AMB); Snd.metal(2200, .2, .3); Snd.noise(.12, 1200, 6, .25); break;
     case 'hammer':
@@ -1005,15 +1111,19 @@ function camTarget(now) {
     case 'plank': return sim.plank.rel ? { x: 2780, y: 760, v: 640 } : { x: 2950, y: 640, v: 480 };
     case 'fall1': case 'rail2': return look(820, .2);
     case 'settle': {
-      if (!sim.lev.hit) { let k = 0; sim.dom.forEach((d, i) => { if (d.on) k = i; }); return { x: g.domP0 + k * g.domGap + 40, y: 950, v: 560 }; }
+      if (!sim.lev.hit) {
+        if (sim.cs.trig[0] != null) return { x: 3612, y: 905, v: 600 };
+        let k = 0; sim.dom.forEach((d, i) => { if (d.on) k = i; }); return { x: g.domP0 + k * g.domGap + 60, y: 930, v: 600 };
+      }
       if (B.phase === 'rest') return { x: g.lev.x + 50, y: 920, v: 600 };
       if (B.phase === 'roll' || B.phase === 'fall') return { x: B.x - 60, y: B.y + 60, v: 640 };
       return { x: 3600, y: 1090, v: 760 };
     }
     case 'drop': return { x: 3350, y: 1220, v: 900 };
-    case 'rail3': return A.x > 4800 && A.y > 1450 ? { x: 5130, y: 1700, v: 820 } : look(980, .35);
+    case 'rail3': return A.x > 4550 ? { x: 5110, y: 1660, v: 740 } : look(980, .35);
+    case 'warp': case 'warpOut': return { x: 5110, y: 1660, v: 740 };
     case 'cup': return { x: 3170, y: 1720, v: 800 };
-    case 'skim': return { x: 4210, y: 1905, v: 600 };
+    case 'skim': return { x: clamp(A.x - 140, 3960, 5040), y: 1880, v: 640 };
     case 'rail3b': case 'rail4': return look(820, .35);
     case 'helix': return { x: GEO.hel.x + 60, y: A.y + 80, v: 760 };
     case 'hsplit': return look(820, .3);
@@ -1358,15 +1468,6 @@ function drawAmbient(t, now, view) {
       ctx.save(); ctx.translate(x, 3328); ctx.rotate(t * 3); ctx.strokeStyle = '#3a434d'; ctx.lineWidth = 3; circ(0, 0, 14); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(14, 0); ctx.stroke(); ctx.restore();
     }
-    for (let i = 0; i < 16; i++) {
-      const x = 40 + ((i * 350 + t * 42) % (W - 120));
-      if (x < view[0] - 120 || x > view[2] + 20) continue;
-      const w = 70 + (i % 3) * 20, h = 46 + (i % 2) * 16;
-      ctx.fillStyle = ['#3a2d1c', '#2e2a20', '#33261a'][i % 3]; ctx.fillRect(x, 3300 - h, w, h);
-      ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 2; ctx.strokeRect(x, 3300 - h, w, h);
-      ctx.fillStyle = 'rgba(242,163,58,.5)'; ctx.fillRect(x + 6, 3300 - h + 8, w - 12, 5);
-      if (labelsOn) txt('No.' + String(100 + i), x + w / 2, 3300 - h / 2 + 8, '600 10px "Martian Mono", monospace', 'rgba(220,200,170,.4)', 'center');
-    }
   }
   // 漂う塵
   ctx.fillStyle = 'rgba(255,220,180,.18)';
@@ -1582,12 +1683,71 @@ function rackPhase() {
   _rackPhase = g.g3[0] + g.r3 * (t + PI / 2) + g.pitch / 2;
   return _rackPhase;
 }
+// 水車の左下の増速歯車列（見た目専用。水車の角度だけで決まるので連鎖の結果には影響しない）
+// 各軸は、前の歯車と噛む小歯車と、次の小歯車を回す大歯車を同じ軸に持つ（時計の輪列と同じ組み方）
+const TRAIN = (() => {
+  const g = GEO, rOf = (n) => n * g.pitch / TAU, ax = [];
+  let c = g.wc, r = g.r1;
+  [[2.79, 9, 24], [3.32, 8, 20], [2.62, 8, 0]].forEach(([dir, np, nw]) => {
+    const rp = rOf(np), d = r + rp; c = [c[0] + d * Math.cos(dir), c[1] + d * Math.sin(dir)];
+    ax.push({ c, dir, np, rp, nw, rw: nw ? rOf(nw) : 0, from: r }); r = nw ? rOf(nw) : 0;
+  });
+  return ax;
+})();
+function trainAngles(phi) {
+  const out = []; let a = phi, r = GEO.r1;
+  for (const t of TRAIN) { const ap = t.dir + PI + PI / t.np - (r / t.rp) * (a - t.dir); out.push(ap); a = ap; r = t.rw; }
+  return out;
+}
+// 各軸の角速度（水車の何倍か）と、前の歯車との噛み合い点
+function trainRates() { let k = 1, r = GEO.r1; return TRAIN.map(t => { k *= -r / t.rp; r = t.rw; return k; }); }
+const TRAIN_K = trainRates();
+function trainMeshes() { return TRAIN.map(t => [t.c[0] - t.rp * Math.cos(t.dir), t.c[1] - t.rp * Math.sin(t.dir)]); }
+// 速く回る歯車は、歯先の円環と流れる弧でぶれを見せ、熱を持ったように光らせる
+function gearSpin(x, y, r, n, ang, om, opts) {
+  gear(x, y, r, n, ang, opts);
+  const sp = Math.abs(om); if (sp < 8 || reduced) return;
+  const k = Math.min(1, (sp - 8) / 50);
+  ctx.save(); ctx.lineCap = 'round';
+  ctx.strokeStyle = `rgba(220,228,236,${.45 * k})`; ctx.lineWidth = 7; circ(x, y, r); ctx.stroke();
+  ctx.strokeStyle = `rgba(255,190,110,${.7 * k})`; ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) { const a0 = ang * (om > 0 ? 1 : -1) * .35 + i * TAU / 3; ctx.beginPath(); ctx.arc(x, y, r * .62, a0, a0 + 1.1); ctx.stroke(); }
+  ctx.restore();
+  glow(x, y, r * 1.9, '255,140,60', .55 * k);
+}
+function drawTrain() {
+  const g = GEO, ta = trainAngles(sim.wh.phi), w0 = sim.wh.locked ? 0 : sim.wh.w, gh = fx.gearHit;
+  // 水車に球が落ちた瞬間、手前の歯車から順に光が走る
+  const fl = (k) => Math.max(fx.flash.train || 0, 1 - Math.abs(gh - .07 * (k + 2)) / .1, 0);
+  const [a0, a1, a2] = ta, [t0, t1, t2] = TRAIN, om = TRAIN_K.map(k => k * w0);
+  // 奥の面: 1軸目の大歯車・2軸目の小歯車・3軸目のはずみ車
+  gearSpin(t0.c[0], t0.c[1], t0.rw, t0.nw, a0, om[0], { dark: true, holes: 6, flash: fl(0) });
+  gearSpin(t1.c[0], t1.c[1], t1.rp, t1.np, a1, om[1], { dark: true, holes: 3, flash: fl(1) });
+  const [fx0, fy0] = t2.c, sp2 = Math.abs(om[2]), heat = Math.min(1, sp2 / 70);
+  ctx.fillStyle = '#0d1013'; circ(fx0, fy0, 36); ctx.fill();
+  ctx.strokeStyle = `rgb(${90 + 165 * heat},${96 + 60 * heat},${104 - 40 * heat})`; ctx.lineWidth = 6; circ(fx0, fy0, 33); ctx.stroke();
+  for (let i = 0; i < 4; i++) { const a = a2 + i * PI / 2; ctx.strokeStyle = '#3a434d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(fx0, fy0); ctx.lineTo(fx0 + Math.cos(a) * 31, fy0 + Math.sin(a) * 31); ctx.stroke(); }
+  // 調速機: 回るほど錘が外へ開く
+  const spread = .35 + .9 * heat, ah = a2 * .5;
+  for (const sgn of [-1, 1]) {
+    const bx = fx0 + Math.cos(ah) * 0 + sgn * Math.sin(spread) * 26, by = fy0 - 34 - Math.cos(spread) * 26;
+    ctx.strokeStyle = '#9aa6b2'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(fx0, fy0 - 40); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.fillStyle = heat > .4 ? `rgb(255,${200 - 80 * heat},${120 - 60 * heat})` : '#c9d2db'; circ(bx, by, 6); ctx.fill();
+  }
+  ctx.fillStyle = steelGrad(fx0 - 4, 0, fx0 + 4, 0); ctx.fillRect(fx0 - 3, fy0 - 46, 6, 46);
+  glow(fx0, fy0, 70, '255,130,50', .7 * heat * heat);
+  // 手前の面: 1軸目の小歯車・2軸目の大歯車・3軸目の小歯車
+  gearSpin(t0.c[0], t0.c[1], t0.rp, t0.np, a0, om[0], { holes: 3, flash: fl(0) });
+  gearSpin(t1.c[0], t1.c[1], t1.rw, t1.nw, a1, om[1], { holes: 5, flash: fl(1) });
+  gearSpin(t2.c[0], t2.c[1], t2.rp, t2.np, a2, om[2], { holes: 3, flash: fl(2) });
+}
 function drawTier2Rails() {
   const g = GEO;
   const r2 = offsetPts(g.rail2Pts.filter(p => p[0] <= 3186), R + 3); struts(r2, 120, 26); rail(r2);
   ctx.fillStyle = '#20262c'; ctx.fillRect(3176, g.platY, 9, 16);
 }
 function drawGearsAndWheel() {
+  drawTrain();
   const g = GEO, [a1, a2, a3] = gearAngles(sim.wh.phi), gf = (fx.flash.wheel || 0) * .8;
   gear(g.g3[0], g.g3[1], g.r3, g.n3, a3, { flash: gf, holes: 4 });
   gear(g.g2[0], g.g2[1], g.r2, g.n2, a2, { flash: gf, holes: 5 });
@@ -1649,6 +1809,33 @@ function drawDominoes() {
     ctx.restore();
     if (f > .02) { const tx = px + g.domH * Math.sin(d.th) - 6, ty = g.platY - g.domH * Math.cos(d.th); glow(tx, ty, 46, '255,190,90', .6 * f); }
   });
+  drawCastle();
+}
+function drawCastle() {
+  const g = GEO, cs = sim.cs, Q = g.cs.pc;
+  // 城門（城壁が立っている間だけ）
+  if (cs.trig[1] == null) {
+    ctx.fillStyle = '#07090b'; ctx.beginPath(); ctx.moveTo(3562, g.platY); ctx.lineTo(3562, 970); ctx.arc(3582, 970, 20, PI, 0); ctx.lineTo(3602, g.platY); ctx.fill();
+    ctx.strokeStyle = 'rgba(242,163,58,.35)'; ctx.lineWidth = 2; for (let x = 3568; x < 3600; x += 8) { ctx.beginPath(); ctx.moveTo(x, 958); ctx.lineTo(x, g.platY - 6); ctx.stroke(); }
+  }
+  cs.p.forEach((p, i) => {
+    const q = Q[i], f = p.st ? Math.max(0, 1 - (sim.t - p.tAct) / .45) : 0, w = p.hw * 2, h = p.hh * 2;
+    ctx.save(); ctx.translate(p.cx, p.cy); ctx.rotate(p.a);
+    if (q.k === 'f') {
+      ctx.fillStyle = '#9aa6b2'; ctx.fillRect(-p.hw, -p.hh, w, h);
+      ctx.fillStyle = f > .05 ? '#ffd27a' : '#e2462f'; ctx.beginPath(); ctx.moveTo(p.hw, -p.hh); ctx.lineTo(p.hw + 18, -p.hh + 6); ctx.lineTo(p.hw, -p.hh + 12); ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(0,0,0,.42)'; ctx.fillRect(-p.hw + 3, -p.hh + 3, w, h);
+      ctx.fillStyle = q.k === 's' ? '#2a3138' : '#1d2329'; rr(-p.hw, -p.hh, w, h, 2); ctx.fill();
+      ctx.fillStyle = 'rgba(210,220,230,.16)'; ctx.fillRect(-p.hw, -p.hh, Math.min(3, w), h);
+      ctx.fillStyle = f > .05 ? `rgba(255,${190 + 50 * f},${120 + 100 * f},1)` : '#f2a33a';
+      if (q.k === 'p') ctx.fillRect(-p.hw, -p.hh, w, 7); else if (q.k === 's') ctx.fillRect(-p.hw, -p.hh, w, 3); else ctx.fillRect(-p.hw, -p.hh, w, 4);
+      if (q.k === 'p') { ctx.fillStyle = 'rgba(235,240,245,.75)'; circ(0, -p.hh * .1, 1.6); ctx.fill(); circ(0, p.hh * .3, 1.6); ctx.fill(); }
+      ctx.strokeStyle = `rgba(255,200,130,${.14 + .86 * f})`; ctx.lineWidth = 1; rr(-p.hw, -p.hh, w, h, 2); ctx.stroke();
+    }
+    ctx.restore();
+  });
+  [0, 1, 2].forEach(k => { const f = fx.flash['castle' + k] || 0; if (f > .02) glow(g.cs.groups[k].px - 30, g.platY - 120, 190, '255,180,90', .55 * f); });
 }
 function drawLeverRodShelf() {
   const g = GEO, L = g.lev, b = sim.lev.b, lf = fx.flash.lever || 0;
@@ -1678,16 +1865,59 @@ function drawLeverRodShelf() {
   ctx.fillStyle = '#e2462f'; ctx.fillRect(g.stopX - 6, stopB - 6, 12, 4);
   glow(g.stopX, stopB - 20, 60, '255,160,110', .7 * sf);
 }
+// ---- ワープ土管。入口は左向き、出口も左向き。胴体は奥へ曲がって消え、二つの土管はつながって見えない
+function pipeGrad(y0, y1, hot) {
+  const gr = ctx.createLinearGradient(0, y0, 0, y1);
+  gr.addColorStop(0, hot ? '#c8ffe0' : '#8fd3a8'); gr.addColorStop(.35, hot ? '#5fd59a' : '#3f8a62'); gr.addColorStop(1, '#12301f');
+  return gr;
+}
+function pipeH(x0, x1, y, r, hot) { ctx.fillStyle = pipeGrad(y - r, y + r, hot); ctx.fillRect(x0, y - r, x1 - x0, r * 2); ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.strokeRect(x0, y - r, x1 - x0, r * 2); }
+function pipeV(x, y0, y1, r, hot) {
+  const gr = ctx.createLinearGradient(x - r, 0, x + r, 0); gr.addColorStop(0, hot ? '#c8ffe0' : '#8fd3a8'); gr.addColorStop(.35, '#3f8a62'); gr.addColorStop(1, '#12301f');
+  ctx.fillStyle = gr; ctx.fillRect(x - r, Math.min(y0, y1), r * 2, Math.abs(y1 - y0)); ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.strokeRect(x - r, Math.min(y0, y1), r * 2, Math.abs(y1 - y0));
+}
+function drawWarpBack() {
+  const W0 = GEO.warp, [ix, iy] = W0.in, [ox, oy] = W0.out;
+  // 入口: 口から右へ伸び、下へ曲がって床の台座に刺さる
+  pipeH(ix + 26, ix + 92, iy, 24); pipeV(ix + 92, iy - 24, iy + 150, 24);
+  ctx.fillStyle = '#20262d'; ctx.fillRect(ix + 56, iy + 150, 72, 14);
+  // 出口: 口から右へ伸び、上へ曲がって天井の台座から下がる
+  pipeH(ox + 26, ox + 100, oy, 24); pipeV(ox + 100, oy + 24, oy - 170, 24);
+  ctx.fillStyle = '#20262d'; ctx.fillRect(ox + 64, oy - 184, 72, 14);
+  txt('WARP', ix + 92, iy + 104, '700 13px "Saira Condensed", sans-serif', 'rgba(220,255,230,.55)', 'center');
+  txt('WARP', ox + 100, oy - 90, '700 13px "Saira Condensed", sans-serif', 'rgba(220,255,230,.55)', 'center');
+}
+function drawWarpFront(now) {
+  const W0 = GEO.warp, A = sim.A, t = now / 1000, fi = fx.flash.warpIn || 0, fo = fx.flash.warpOut || 0;
+  const inside = A.phase === 'warp' && A.pt > .06;
+  [[W0.in, fi], [W0.out, fo]].forEach(([[x, y], f]) => {
+    // 口の奥は渦を巻く暗がり。球が入っている間は光る
+    const on = Math.max(f, inside ? .7 : 0);
+    ctx.fillStyle = '#04110a'; ctx.beginPath(); ctx.ellipse(x + 6, y, 9, 22, 0, 0, TAU); ctx.fill();
+    if (on > .05) { ctx.strokeStyle = `rgba(150,255,200,${.8 * on})`; ctx.lineWidth = 2; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(x + 6, y, 3 + k * 3, 7 + k * 6, 0, t * 9 + k, t * 9 + k + 3.4); ctx.stroke(); } }
+    ctx.fillStyle = pipeGrad(y - 30, y + 30, on > .3); rr(x - 2, y - 30, 28, 60, 4); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.5; rr(x - 2, y - 30, 28, 60, 4); ctx.stroke();
+    ctx.fillStyle = '#04110a'; ctx.beginPath(); ctx.ellipse(x - 1, y, 7, 22, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2a33a'; ctx.fillRect(x + 18, y - 30, 3, 60);
+    glow(x, y, 90, '120,255,180', .7 * on);
+  });
+  if (inside) {
+    // 入口から出口へ、光の粒が飛ぶ
+    const u = clamp((A.pt - .06) / (W0.hold - .06), 0, 1), [x0, y0] = W0.in, [x1, y1] = W0.out, cx = 5230, cy = 1450;
+    const at = (v) => [(1 - v) ** 2 * x0 + 2 * v * (1 - v) * cx + v * v * x1, (1 - v) ** 2 * y0 + 2 * v * (1 - v) * cy + v * v * y1];
+    ctx.save(); ctx.setLineDash([3, 9]); ctx.lineDashOffset = -t * 120; ctx.strokeStyle = 'rgba(150,255,200,.35)'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let i = 0; i <= 24; i++) { const q = at(i / 24); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); } ctx.stroke(); ctx.restore();
+    for (let k = 0; k < 6; k++) { const q = at(Math.max(0, u - k * .035)); glow(q[0], q[1], 26 - k * 3, '170,255,210', .8 - k * .12); }
+  }
+}
 // ---- 中段下〜下段
 function drawLowRails() {
-  const g = GEO, sp = g.sbParts;
+  const g = GEO;
   const low = offsetPts(lineP(g.low0, g.low1, 40), R + 3); struts(low, 160, 30); rail(low);
   drawBooster(g.pathLow, g.boost2);
-  [[sp.s1], [sp.s2], [sp.s3]].forEach(([s]) => { const o = offsetPts(s, R + 3); struts(o, 150, 22); rail(o); });
-  [[sp.a1, [5400, 1580]], [sp.a2, [4950, 1720]], [sp.a3, [5400, 1860]]].forEach(([a, c]) => rail(offsetPts(a, R + 3, c)));
-  const t3 = offsetPts(sp.t3, R + 3); struts(t3, 200, 30); rail(t3);
+  rail(offsetPts(lineP(g.low1, [g.warp.in[0], g.low1[1]], 4), R + 3));
   const t3l = offsetPts(g.pathLow2.p, R + 3); struts(t3l, 200, 30); rail(t3l);
-  ctx.fillStyle = '#e2462f'; ctx.save(); ctx.translate(g.pool.lip, g.t3Y(g.pool.lip) + R + 3); ctx.rotate(.5); ctx.fillRect(-16, -3, 18, 6); ctx.restore();
+  drawWarpBack();
   // カップと踏み板、ケーブル
   const cx = g.cupX, cy = g.cupY, inCup = sim.A.phase === 'cup' ? 1 : 0;
   const cup = []; for (let i = 0; i <= 20; i++) { const x = cx - 50 + i * 5; cup.push([x, sim.cupY(x) + R + 3]); }
@@ -2058,8 +2288,8 @@ let cw = 0, ch = 0, dpr = 1, viewRect = [0, 0, W, H];
 const CULL = Object.fromEntries(Object.entries({
   nameplate: [270, 1056, 800, 1266], dial: [1042, 1032, 1464, 1457], funnel: [168, 3014, 492, 3326], lane: [20, 72, 300, 968],
   tier1: [1119, 343, 2802, 717], pins: [372, 91, 1011, 594], cradle: [2697, 374, 3128, 773], tier2: [2637, 890, 3187, 1044],
-  gears: [3793, 1045, 4036, 1346], gate: [3175, 978, 3966, 1057], lever: [3712, 742, 4021, 1098], dominoes: [3278, 947, 3724, 1004],
-  low: [1380, 1332, 5457, 2030], hammer: [2580, 1080, 3456, 1920], tier4: [1242, 1821, 5250, 3138], run: [250, 2136, 5468, 3355], tier4f: [1260, 1952, 5025, 2810], pool: [3600, 1870, 4840, 2075]
+  gears: [3700, 1045, 4036, 1346], gate: [3175, 978, 3966, 1057], lever: [3712, 742, 4021, 1098], dominoes: [3278, 700, 3850, 1070],
+  low: [1380, 1332, 5457, 2030], hammer: [2580, 1080, 3456, 1920], tier4: [1242, 1821, 5250, 3138], run: [250, 2136, 5468, 3355], tier4f: [1260, 1952, 5025, 2810], pool: [3600, 1870, 5380, 2075], warp: [4930, 1440, 5440, 1880]
 }).map(([k, b]) => [k, [b[0] - 80, b[1] - 80, b[2] + 80, b[3] + 80]]));
 function resize() {
   const r = cv.getBoundingClientRect(); dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -2087,6 +2317,7 @@ function render(now) {
   if (on('tier2')) drawTier2Rails(); if (on('gears')) drawGearsAndWheel(); if (on('gate')) drawPlatformAndGate(); if (on('lever')) drawLeverRodShelf(); if (on('dominoes')) drawDominoes();
   if (on('low')) drawLowRails(); if (on('pool')) drawPoolBack(now); if (on('hammer')) drawHammer(); if (on('tier4')) drawTier4Back(now);
   drawBalls();
+  if (on('warp')) drawWarpFront(now);
   if (on('pool')) drawPoolFront(now);
   if (on('run')) drawRunZone(now);
   if (on('tier4f')) drawTier4Front(now);
@@ -2170,6 +2401,15 @@ function frame(now) {
   const tooth = Math.floor(gearAngles(sim.wh.phi)[2] / (TAU / GEO.n3));
   if (lastTooth !== null && tooth !== lastTooth && sim.wh.w > 0) Snd.noise(.012, 5200, 3, .16);
   lastTooth = tooth;
+  if (!sim.wh.locked && sim.wh.w > .3 && !reduced) {
+    const ms = trainMeshes();
+    TRAIN.forEach((t, k) => {
+      const om = Math.abs(TRAIN_K[k] * sim.wh.w); if (om < 5) return;
+      const n = Math.min(3, Math.floor(om / 26 * rdt * 60 + fx.rng())), tan = t.dir + (TRAIN_K[k] > 0 ? PI / 2 : -PI / 2);
+      if (n) fx.spark(ms[k][0], ms[k][1], n, 160 + om * 6, om > 40 ? '255,236,200' : '255,170,90', 40, tan, 1.2);
+    });
+    const om2 = Math.abs(TRAIN_K[2] * sim.wh.w); if (om2 > 12 && fx.rng() < .5) Snd.noise(.025, 1800 + Math.min(om2 * 40, 4200), 6, .05 * Math.min(1, om2 / 60));
+  }
   const A = sim.A, sp = A.phase === 'spiral' ? sim.fun.w * sim.fun.r : Math.hypot(A.vx, A.vy);
   Snd.setRoll((A.onRail || A.phase === 'spiral' || sim.B.phase === 'roll') ? clamp(sp / 900, 0, 1) * .38 : 0, sp);
   // レールとの摩擦火花: 速いほど多く、進行方向の後ろへ散る
