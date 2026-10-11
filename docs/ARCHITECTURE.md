@@ -139,5 +139,5 @@ public/chain/index.html
 放物線は始点・終点・時間から初速を逆算する（`ballistic`）ので、狙った点に必ず当たる。シミュレーション部分だけを Node で早送りして、完走することと毎回同じ結果になることを `scripts/chain-sim.test.mjs` が確かめる（`make ci` に含まれる）。
 
 ```bash
-node scripts/chain-sim.mjs   # done true / endT 40.66 s / repeat identical true
+node scripts/chain-sim.mjs   # OK: 28 段すべてに到達 / 40.90 s / 2 回の軌道が一致
 ```
